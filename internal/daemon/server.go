@@ -88,14 +88,19 @@ func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.Revi
 
 	client := lmstudio.New(s.cfg.LMStudio.URL, s.cfg.LMStudio.Token, model)
 
+	rules := make([]string, len(s.cfg.Rules))
+	for i, r := range s.cfg.Rules {
+		rules[i] = r.Text
+	}
+
 	var (
 		result *review.Result
 		err    error
 	)
 	if scope == "repo" && len(req.Diff) > 80_000 {
-		result, err = review.ChunkedRepoReview(ctx, client, req.Diff, scope)
+		result, err = review.ChunkedRepoReview(ctx, client, req.Diff, scope, rules)
 	} else {
-		r := review.New(client, scope)
+		r := review.New(client, scope, rules)
 		result, err = r.ReviewDiff(ctx, req.Diff)
 	}
 

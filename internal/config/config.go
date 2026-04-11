@@ -13,6 +13,7 @@ import (
 // Config is the top-level configuration.
 type Config struct {
 	LMStudio LMStudio `toml:"lmstudio"`
+	Rules    []Rule   `toml:"rules"`
 }
 
 // LMStudio holds connection and model settings.
@@ -22,6 +23,12 @@ type LMStudio struct {
 	Token     string `toml:"token"`
 	FastModel string `toml:"fast_model"`
 	DeepModel string `toml:"deep_model"`
+}
+
+// Rules holds the review rules sent to the LLM as part of the system prompt.
+// Define in config.toml under [[rules]] to customize what lm-review enforces.
+type Rule struct {
+	Text string `toml:"text"`
 }
 
 // Load reads config from the XDG config path.

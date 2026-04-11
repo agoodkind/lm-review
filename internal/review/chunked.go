@@ -21,11 +21,11 @@ const (
 
 // ChunkedRepoReview reviews a large codebase by splitting it into chunks,
 // reviewing each independently, then merging the results into one Result.
-func ChunkedRepoReview(ctx context.Context, client *lmstudio.Client, files string, scope string) (*Result, error) {
+func ChunkedRepoReview(ctx context.Context, client *lmstudio.Client, files string, scope string, rules []string) (*Result, error) {
 	chunks := splitIntoChunks(files, chunkBytes)
 
 	if len(chunks) == 1 {
-		r := New(client, scope)
+		r := New(client, scope, rules)
 		return r.ReviewRepo(ctx, files)
 	}
 
@@ -38,7 +38,7 @@ func ChunkedRepoReview(ctx context.Context, client *lmstudio.Client, files strin
 
 	for i, chunk := range chunks {
 		raw, err := client.Chat(ctx, []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage(systemPrompt),
+			openai.SystemMessage(BuildSystemPrompt(rules)),
 			openai.UserMessage(ChunkPrompt(chunk, i+1, len(chunks))),
 		})
 		if err != nil {
