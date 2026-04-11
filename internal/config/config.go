@@ -15,15 +15,12 @@ type Config struct {
 }
 
 // LMStudio holds connection and model settings.
+// Works with any OpenAI-compatible endpoint: LM Studio, ollama, OpenAI, etc.
 type LMStudio struct {
 	URL       string `toml:"url"`
 	Token     string `toml:"token"`
 	FastModel string `toml:"fast_model"`
 	DeepModel string `toml:"deep_model"`
-	// LMSPath overrides the lms CLI binary path.
-	// If empty, lm-review searches PATH then platform defaults.
-	// Set to "none" to disable lifecycle management entirely.
-	LMSPath   string `toml:"lms_path,omitempty"`
 }
 
 // Load reads config from XDG_CONFIG_HOME/lm-review/config.toml.

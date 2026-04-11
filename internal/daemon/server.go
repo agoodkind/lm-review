@@ -86,10 +86,6 @@ func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.Revi
 		model = s.cfg.LMStudio.DeepModel
 	}
 
-	if err := lmstudio.EnsureReady(ctx, s.cfg.LMStudio.URL, s.cfg.LMStudio.Token, model, s.cfg.LMStudio.LMSPath); err != nil {
-		return nil, fmt.Errorf("LM Studio not ready: %w", err)
-	}
-
 	client := lmstudio.New(s.cfg.LMStudio.URL, s.cfg.LMStudio.Token, model)
 
 	var (
