@@ -25,10 +25,12 @@ type LMStudio struct {
 	DeepModel string `toml:"deep_model"`
 }
 
-// Rules holds the review rules sent to the LLM as part of the system prompt.
-// Define in config.toml under [[rules]] to customize what lm-review enforces.
+// Rule is a single review instruction sent to the LLM.
+// If Globs is set, the rule is only included when the diff or repo contains
+// files matching at least one glob. Rules with no Globs always apply.
 type Rule struct {
-	Text string `toml:"text"`
+	Text  string   `toml:"text"`
+	Globs []string `toml:"globs,omitempty"`
 }
 
 // Load reads config from the XDG config path.

@@ -4,22 +4,16 @@
 
 [lmstudio]
 url        = "http://localhost:1234"  # LM Studio, ollama (:11434), or OpenAI
-token      = ""                        # API token - required for LM Studio, "ollama" for ollama
-fast_model = ""                        # Small/fast model for diff/pr reviews on every build
+token      = ""                        # API token
+fast_model = ""                        # Small/fast model for diff/pr reviews
 deep_model = ""                        # Large model for repo-wide reviews
 
-# Review rules sent to the LLM as part of every review prompt.
-# Add, remove, or reword rules to match your team's standards.
-# Each rule is a plain English instruction enforced during review.
+# Rules are sent to the LLM as part of every review prompt.
+# Rules with no globs apply to every review.
+# Rules with globs apply only when matching files are present in the diff.
 
 [[rules]]
 text = "No emdashes or en-dashes in any comments or strings."
-
-[[rules]]
-text = "Use slog for all logging. Never use fmt.Fprintf(os.Stderr) for diagnostics."
-
-[[rules]]
-text = "All config must be TOML. No JSON for user-facing config files."
 
 [[rules]]
 text = "Flag duplicated logic. Consolidate it."
@@ -64,16 +58,30 @@ text = "No IPv4 literals. Use domain names or IPv6 literals."
 text = "Documentation should describe intent and behavior, not implementation. Flag anything that will become stale as code evolves."
 
 [[rules]]
-text = "Cross-language code must not be inlined. Shell called from Go, SQL called from Python, AppleScript called from JavaScript, etc. must live in their own file with the correct extension. The host language loads the file at runtime. Flag any inline here-doc, multiline string, or embedded script in a foreign language."
-
-[[rules]]
-text = "Shell scripts must have a shebang (#!/usr/bin/env bash or #!/usr/bin/env zsh), use snake_case for functions and locals, UPPER_CASE for globals, 4-space indent, and [[ ]] for tests. Variables must be scoped with local inside functions. Scripts that spawn background processes must trap INT/TERM, track PIDs, kill them in the trap handler, and clean up temp files."
-
-[[rules]]
-text = "Commit messages must be a single imperative subject line with no trailing period, no type prefix or scope, no body or bullet list. State what changed and where. Do not state why."
-
-[[rules]]
 text = "Sensitive values must never appear in code, logs, or output. Store secrets in environment variables or file references only. Flag any literal token, key, or password that should be a reference instead."
 
 [[rules]]
 text = "Comments should only appear when the code is not self-explanatory. Flag comments that restate the code, describe what rather than why, or drift from what the code actually does."
+
+[[rules]]
+text = "Cross-language code must not be inlined. Shell called from Go, SQL called from Python, etc. must live in their own file. The host language loads the file at runtime. Flag any inline here-doc, multiline string, or embedded script in a foreign language."
+
+[[rules]]
+text = "Use slog for all logging. Never use fmt.Fprintf(os.Stderr) for diagnostics."
+globs = ["*.go"]
+
+[[rules]]
+text = "All config must be TOML. No JSON for user-facing config files."
+globs = ["*.go", "*.ts", "*.js"]
+
+[[rules]]
+text = "Shell scripts must have a shebang, use snake_case for functions and locals, UPPER_CASE for globals, 4-space indent, and [[ ]] for tests. Variables must be scoped with local inside functions. Scripts spawning background processes must trap INT/TERM, track PIDs, kill them in the trap handler, and clean up temp files."
+globs = ["*.sh", "*.bash", "*.zsh"]
+
+[[rules]]
+text = "JavaScript and TypeScript: use function declarations for top-level functions, not arrow functions. All JSDoc must include types exhaustively."
+globs = ["*.js", "*.jsx", "*.ts", "*.tsx"]
+
+[[rules]]
+text = "Ruby: use one guard clause per condition."
+globs = ["*.rb"]

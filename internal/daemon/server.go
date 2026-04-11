@@ -88,10 +88,15 @@ func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.Revi
 
 	client := lmstudio.New(s.cfg.LMStudio.URL, s.cfg.LMStudio.Token, model)
 
-	rules := make([]string, len(s.cfg.Rules))
+	// Extract texts and globs from config rules, then filter to files in this diff.
+	texts := make([]string, len(s.cfg.Rules))
+	globs := make([][]string, len(s.cfg.Rules))
 	for i, r := range s.cfg.Rules {
-		rules[i] = r.Text
+		texts[i] = r.Text
+		globs[i] = r.Globs
 	}
+	files := review.FilesFromDiff(req.Diff)
+	rules := review.FilterRules(texts, globs, files)
 
 	var (
 		result *review.Result

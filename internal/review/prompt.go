@@ -3,6 +3,8 @@ package review
 
 import (
 	"fmt"
+	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -36,8 +38,43 @@ Verdict rules:
 - "warn": warnings present but no blockers
 - "pass": clean or only informational notes`
 
+// reDiffFile matches file paths from unified diff headers: "+++ b/path/to/file"
+var reDiffFile = regexp.MustCompile(`(?m)^\+\+\+ b/(.+)$`)
+
+// FilesFromDiff extracts the set of file paths touched by a unified diff.
+func FilesFromDiff(diff string) []string {
+	matches := reDiffFile.FindAllStringSubmatch(diff, -1)
+	seen := make(map[string]bool)
+	var files []string
+	for _, m := range matches {
+		if !seen[m[1]] {
+			seen[m[1]] = true
+			files = append(files, m[1])
+		}
+	}
+	return files
+}
+
+// ruleApplies returns true when a rule should be included given the files present.
+// Rules with no globs always apply. Rules with globs apply when at least one file matches.
+func ruleApplies(globs []string, files []string) bool {
+	if len(globs) == 0 {
+		return true
+	}
+	for _, g := range globs {
+		for _, f := range files {
+			if matched, _ := filepath.Match(g, filepath.Base(f)); matched {
+				return true
+			}
+			if matched, _ := filepath.Match(g, f); matched {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // BuildSystemPrompt constructs the system prompt from a list of rule strings.
-// Rules come from the user's config.toml [[rules]] entries.
 func BuildSystemPrompt(rules []string) string {
 	var sb strings.Builder
 	sb.WriteString(systemPromptHeader)
@@ -51,6 +88,22 @@ func BuildSystemPrompt(rules []string) string {
 
 	sb.WriteString(systemPromptSchema)
 	return sb.String()
+}
+
+// FilterRules returns only the rule texts whose globs match the given files.
+// Rules with no globs always pass through.
+func FilterRules(ruleTexts []string, ruleGlobs [][]string, files []string) []string {
+	out := make([]string, 0, len(ruleTexts))
+	for i, text := range ruleTexts {
+		var globs []string
+		if i < len(ruleGlobs) {
+			globs = ruleGlobs[i]
+		}
+		if ruleApplies(globs, files) {
+			out = append(out, text)
+		}
+	}
+	return out
 }
 
 // DiffPrompt builds the user message for a diff review.
