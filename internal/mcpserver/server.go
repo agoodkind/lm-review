@@ -5,11 +5,11 @@ package mcpserver
 import (
 	"context"
 	"fmt"
-	"log"
 	"os/exec"
 	"strings"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 
 	"goodkind.io/lm-review/api/reviewpb"
 	"goodkind.io/lm-review/internal/daemon"
@@ -17,86 +17,76 @@ import (
 
 // Serve starts the MCP stdio server and blocks until the client disconnects.
 func Serve(ctx context.Context) error {
-	s := mcp.NewServer(&mcp.Implementation{Name: "lm-review", Version: "1.0.0"}, nil)
+	s := server.NewMCPServer("lm-review", "1.0.0")
 
-	type DiffInput struct {
-		Deep bool `json:"deep" jsonschema:"use the deep model (slower, more thorough)"`
-	}
-	type PRInput struct {
-		Deep bool `json:"deep" jsonschema:"use the deep model (slower, more thorough)"`
-	}
-	type RepoInput struct{}
-
-	mcp.AddTool(s,
-		&mcp.Tool{Name: "review_diff", Description: "Review staged git changes for code quality, style, and correctness."},
-		func(ctx context.Context, req *mcp.CallToolRequest, in DiffInput) (*mcp.CallToolResult, ReviewOutput, error) {
+	s.AddTool(
+		mcp.NewTool("review_diff",
+			mcp.WithDescription("Review staged git changes for code quality, style, and correctness."),
+			mcp.WithBoolean("deep", mcp.Description("Use the deep model (slower, more thorough).")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			deep := req.GetBool("deep", false)
 			diff, err := gitOutput("diff", "--cached")
 			if err != nil {
-				return nil, ReviewOutput{}, fmt.Errorf("git diff: %w", err)
+				return mcp.NewToolResultError(fmt.Sprintf("git diff: %v", err)), nil
 			}
-			resp, err := callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-				return c.ReviewDiff(ctx, diff, in.Deep)
+			return runReview(ctx, diff, deep, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
+				return c.ReviewDiff(ctx, diff, deep)
 			})
-			if err != nil {
-				return nil, ReviewOutput{}, err
-			}
-			out := toOutput(resp)
-			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: out.Markdown}}}, out, nil
 		},
 	)
 
-	mcp.AddTool(s,
-		&mcp.Tool{Name: "review_pr", Description: "Review all changes on the current branch vs main."},
-		func(ctx context.Context, req *mcp.CallToolRequest, in PRInput) (*mcp.CallToolResult, ReviewOutput, error) {
+	s.AddTool(
+		mcp.NewTool("review_pr",
+			mcp.WithDescription("Review all changes on the current branch vs main."),
+			mcp.WithBoolean("deep", mcp.Description("Use the deep model (slower, more thorough).")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			deep := req.GetBool("deep", false)
 			diff, err := prDiff()
 			if err != nil {
-				return nil, ReviewOutput{}, fmt.Errorf("git diff vs main: %w", err)
+				return mcp.NewToolResultError(err.Error()), nil
 			}
-			resp, err := callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-				return c.ReviewPR(ctx, diff, in.Deep)
+			return runReview(ctx, diff, deep, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
+				return c.ReviewPR(ctx, diff, deep)
 			})
-			if err != nil {
-				return nil, ReviewOutput{}, err
-			}
-			out := toOutput(resp)
-			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: out.Markdown}}}, out, nil
 		},
 	)
 
-	mcp.AddTool(s,
-		&mcp.Tool{Name: "review_repo", Description: "Full repository health review: tech debt, structural issues, improvement opportunities."},
-		func(ctx context.Context, req *mcp.CallToolRequest, in RepoInput) (*mcp.CallToolResult, ReviewOutput, error) {
+	s.AddTool(
+		mcp.NewTool("review_repo",
+			mcp.WithDescription("Full repository health review: tech debt, structural issues, improvement opportunities."),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			files, err := repoSnapshot()
 			if err != nil {
-				return nil, ReviewOutput{}, fmt.Errorf("repo snapshot: %w", err)
+				return mcp.NewToolResultError(err.Error()), nil
 			}
-			resp, err := callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
+			return runReview(ctx, files, true, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
 				return c.ReviewRepo(ctx, files, true)
 			})
-			if err != nil {
-				return nil, ReviewOutput{}, err
-			}
-			out := toOutput(resp)
-			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: out.Markdown}}}, out, nil
 		},
 	)
 
-	if err := s.Run(ctx, &mcp.StdioTransport{}); err != nil {
-		log.Fatal(err)
-	}
-	return nil
+	return server.ServeStdio(s)
 }
 
-func callDaemon(ctx context.Context, fn func(*daemon.Client) (*reviewpb.ReviewResponse, error)) (*reviewpb.ReviewResponse, error) {
+func runReview(ctx context.Context, _ string, _ bool, fn func(*daemon.Client) (*reviewpb.ReviewResponse, error)) (*mcp.CallToolResult, error) {
 	client, err := daemon.Connect(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("lm-review daemon unavailable: %w", err)
+		return mcp.NewToolResultError(fmt.Sprintf("lm-review daemon unavailable: %v", err)), nil
 	}
 	defer client.Close()
-	return fn(client)
+
+	resp, err := fn(client)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return mcp.NewToolResultText(formatResponse(resp)), nil
 }
 
-func toOutput(resp *reviewpb.ReviewResponse) ReviewOutput {
+func formatResponse(resp *reviewpb.ReviewResponse) string {
 	icon := map[string]string{"pass": "✅", "warn": "⚠️", "block": "🚫"}[resp.Verdict]
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%s **%s** (%s, %dms): %s", icon, strings.ToUpper(resp.Verdict), resp.Model, resp.LatencyMs, resp.Summary)
@@ -107,23 +97,13 @@ func toOutput(resp *reviewpb.ReviewResponse) ReviewOutput {
 			fmt.Fprintf(&sb, "| %s | `%s` | %d | %s | %s |\n", sevIcon, issue.File, issue.Line, issue.Rule, issue.Message)
 		}
 	}
-	return ReviewOutput{
-		Verdict:  resp.Verdict,
-		Summary:  resp.Summary,
-		Markdown: sb.String(),
-	}
-}
-
-type ReviewOutput struct {
-	Verdict  string `json:"verdict"`
-	Summary  string `json:"summary"`
-	Markdown string `json:"markdown"`
+	return sb.String()
 }
 
 func gitOutput(args ...string) (string, error) {
 	out, err := exec.Command("git", args...).Output()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return string(out), nil
 }
