@@ -1,0 +1,41 @@
+version: 2
+
+project_name: lm-review
+
+builds:
+  - id: lm-review
+    main: ./cmd/lm-review
+    binary: lm-review
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - id: lm-review
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+release:
+  name_template: "{{ .Date }} · build {{ .Env.HEX_RUN }} · {{ .ShortCommit }}"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
