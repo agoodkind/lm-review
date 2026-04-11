@@ -29,14 +29,13 @@ func StateDir() string {
 }
 
 // RuntimeDir returns $XDG_RUNTIME_DIR/lm-review (sockets, PIDs).
+// Falls back to os.TempDir() which uses TMPDIR, TEMP, TMP, or the
+// OS default (/tmp on Linux, /var/folders/... on macOS, %TEMP% on Windows).
 func RuntimeDir() string {
 	if base := os.Getenv("XDG_RUNTIME_DIR"); base != "" {
 		return filepath.Join(base, app)
 	}
-	if base := os.Getenv("TMPDIR"); base != "" {
-		return filepath.Join(base, app)
-	}
-	return filepath.Join("/tmp", app)
+	return filepath.Join(os.TempDir(), app)
 }
 
 // ConfigPath returns the path to config.toml.
