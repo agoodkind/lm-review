@@ -28,7 +28,10 @@ func Serve(ctx context.Context) error {
 			deep := req.GetBool("deep", false)
 			diff, err := gitOutput("diff", "--cached")
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("git diff: %v", err)), nil
+				return mcp.NewToolResultText("No staged changes to review (not in a git repo or nothing staged)."), nil
+			}
+			if strings.TrimSpace(diff) == "" {
+				return mcp.NewToolResultText("No staged changes to review. Stage files with `git add` first."), nil
 			}
 			return runReview(ctx, diff, deep, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
 				return c.ReviewDiff(ctx, diff, deep)
@@ -45,7 +48,10 @@ func Serve(ctx context.Context) error {
 			deep := req.GetBool("deep", false)
 			diff, err := prDiff()
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return mcp.NewToolResultText(fmt.Sprintf("Cannot diff vs main: %v. Are you in a git repo with a main branch?", err)), nil
+			}
+			if strings.TrimSpace(diff) == "" {
+				return mcp.NewToolResultText("No changes vs main branch."), nil
 			}
 			return runReview(ctx, diff, deep, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
 				return c.ReviewPR(ctx, diff, deep)
@@ -60,7 +66,10 @@ func Serve(ctx context.Context) error {
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			files, err := repoSnapshot()
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return mcp.NewToolResultText(fmt.Sprintf("Cannot snapshot repo: %v. Are you in a git repo?", err)), nil
+			}
+			if strings.TrimSpace(files) == "" {
+				return mcp.NewToolResultText("No Go files found in repo."), nil
 			}
 			return runReview(ctx, files, true, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
 				return c.ReviewRepo(ctx, files, true)
@@ -74,7 +83,7 @@ func Serve(ctx context.Context) error {
 func runReview(ctx context.Context, _ string, _ bool, fn func(*daemon.Client) (*reviewpb.ReviewResponse, error)) (*mcp.CallToolResult, error) {
 	client, err := daemon.Connect(ctx)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("lm-review daemon unavailable: %v", err)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("lm-review daemon unavailable (is LM Studio running?): %v", err)), nil
 	}
 	defer client.Close()
 
