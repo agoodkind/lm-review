@@ -4,26 +4,26 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"goodkind.io/lm-review/internal/config"
-	"goodkind.io/lm-review/internal/github"
-	"goodkind.io/lm-review/internal/lmstudio"
-	"goodkind.io/lm-review/internal/review"
+	"goodkind.io/lm-review/api/reviewpb"
+	"goodkind.io/lm-review/internal/daemon"
+	"goodkind.io/lm-review/internal/mcpserver"
 )
 
 func main() {
 	root := &cobra.Command{
 		Use:   "lm-review",
-		Short: "LLM-powered local code review",
+		Short: "LLM-powered local code review using LM Studio",
 	}
 
 	root.AddCommand(newDiffCmd())
 	root.AddCommand(newPRCmd())
 	root.AddCommand(newRepoCmd())
+	root.AddCommand(newDaemonCmd())
+	root.AddCommand(newMCPCmd())
 	root.AddCommand(newInitCmd())
 
 	if err := root.Execute(); err != nil {
@@ -33,27 +33,23 @@ func main() {
 
 func newDiffCmd() *cobra.Command {
 	var deep bool
-
 	cmd := &cobra.Command{
 		Use:   "diff",
-		Short: "Review staged diff (runs on make build)",
+		Short: "Review staged changes (runs on make build)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			diff, err := stagedDiff()
+			diff, err := gitOutput("diff", "--cached")
 			if err != nil {
 				return err
 			}
-
-			return run(cmd.Context(), "diff", diff, deep)
+			return runReview(cmd.Context(), "diff", diff, deep)
 		},
 	}
-
-	cmd.Flags().BoolVar(&deep, "deep", false, "Use deep model instead of fast model")
+	cmd.Flags().BoolVar(&deep, "deep", false, "Use deep model")
 	return cmd
 }
 
 func newPRCmd() *cobra.Command {
 	var deep bool
-
 	cmd := &cobra.Command{
 		Use:   "pr",
 		Short: "Review diff against main branch",
@@ -62,37 +58,66 @@ func newPRCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-
-			return run(cmd.Context(), "pr", diff, deep)
+			return runReview(cmd.Context(), "pr", diff, deep)
 		},
 	}
-
-	cmd.Flags().BoolVar(&deep, "deep", false, "Use deep model instead of fast model")
+	cmd.Flags().BoolVar(&deep, "deep", false, "Use deep model")
 	return cmd
 }
 
 func newRepoCmd() *cobra.Command {
 	var async bool
-
 	cmd := &cobra.Command{
 		Use:   "repo",
-		Short: "Full repo review (run occasionally for debt cleanup)",
+		Short: "Full repo health review",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if async {
-				return runAsync()
+				return runRepoAsync()
 			}
-
 			files, err := repoSnapshot()
 			if err != nil {
 				return err
 			}
 
-			return runRepo(cmd.Context(), files)
+			client, err := daemon.Connect(cmd.Context())
+			if err != nil {
+				fmt.Fprintln(os.Stderr, skipMsg(err))
+				return nil
+			}
+			defer client.Close()
+
+			resp, err := client.ReviewRepo(cmd.Context(), files, true)
+			if err != nil {
+				return err
+			}
+
+			printResult(resp)
+			return postToGitHub("repo", resp)
 		},
 	}
-
-	cmd.Flags().BoolVar(&async, "async", false, "Run in background and post result when done")
+	cmd.Flags().BoolVar(&async, "async", false, "Run in background, post result when done")
 	return cmd
+}
+
+func newDaemonCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "daemon",
+		Short:  "Start the lm-review daemon",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return daemon.Run()
+		},
+	}
+}
+
+func newMCPCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "mcp",
+		Short: "Start MCP stdio server for Claude Code integration",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return mcpserver.Serve(cmd.Context())
+		},
+	}
 }
 
 func newInitCmd() *cobra.Command {
@@ -100,151 +125,87 @@ func newInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Create default config at XDG config path",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := config.WriteDefault(""); err != nil {
-				return err
-			}
-
-			fmt.Printf("Created config at %s\n", config.ConfigPath())
-			fmt.Println("Set your LM Studio token in the config file.")
-			return nil
+			return runInit()
 		},
 	}
 }
 
-func run(ctx context.Context, scope, diff string, deep bool) error {
-	cfg, err := config.Load()
+func runReview(ctx context.Context, scope, diff string, deep bool) error {
+	client, err := daemon.Connect(ctx)
 	if err != nil {
-		return err
-	}
-
-	client := lmstudio.New(cfg.LMStudio.URL, cfg.LMStudio.Token)
-
-	if err := client.Ping(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "lm-review: skipping (LM Studio unavailable: %v)\n", err)
+		fmt.Fprintln(os.Stderr, skipMsg(err))
 		return nil
 	}
+	defer client.Close()
 
-	model := cfg.LMStudio.FastModel
-	if deep {
-		model = cfg.LMStudio.DeepModel
+	var resp *reviewpb.ReviewResponse
+	switch scope {
+	case "diff":
+		resp, err = client.ReviewDiff(ctx, diff, deep)
+	case "pr":
+		resp, err = client.ReviewPR(ctx, diff, deep)
 	}
-
-	r := review.New(client, model, scope)
-
-	result, err := r.ReviewDiff(ctx, diff)
 	if err != nil {
 		return fmt.Errorf("review: %w", err)
 	}
 
-	printResult(result)
+	printResult(resp)
 
-	if err := github.UpsertComment(scope, result.Markdown()); err != nil {
+	if err := postToGitHub(scope, resp); err != nil {
 		fmt.Fprintf(os.Stderr, "lm-review: could not post PR comment: %v\n", err)
 	}
 
-	os.Exit(result.ExitCode())
+	if resp.Verdict == "block" {
+		os.Exit(1)
+	}
 	return nil
 }
 
-func runRepo(ctx context.Context, files string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
+func printResult(resp *reviewpb.ReviewResponse) {
+	icon := map[string]string{"pass": "✅", "warn": "⚠️", "block": "🚫"}[resp.Verdict]
+	fmt.Fprintf(os.Stderr, "\nlm-review [%s] %s %s: %s\n",
+		resp.Model, icon, strings.ToUpper(resp.Verdict), resp.Summary)
+	for _, issue := range resp.Issues {
+		fmt.Fprintf(os.Stderr, "  %s:%d [%s] %s\n", issue.File, issue.Line, issue.Rule, issue.Message)
 	}
+	fmt.Fprintln(os.Stderr)
+}
 
-	client := lmstudio.New(cfg.LMStudio.URL, cfg.LMStudio.Token)
-	r := review.New(client, cfg.LMStudio.DeepModel, "repo")
+func skipMsg(err error) string {
+	return fmt.Sprintf("lm-review: skipping (daemon unavailable: %v)", err)
+}
 
-	result, err := r.ReviewRepo(ctx, files)
-	if err != nil {
-		return fmt.Errorf("review: %w", err)
-	}
-
-	printResult(result)
-
-	if err := github.UpsertComment("repo", result.Markdown()); err != nil {
-		fmt.Fprintf(os.Stderr, "lm-review: could not post PR comment: %v\n", err)
-	}
-
+func runInit() error {
+	fmt.Println("lm-review init: run 'lm-review mcp' to start the MCP server,")
+	fmt.Println("or add it to ~/.claude/mcp.json:")
+	fmt.Printf(`
+{
+  "mcpServers": {
+    "lm-review": {
+      "command": "%s",
+      "args": ["mcp"]
+    }
+  }
+}
+`, mustExecPath())
 	return nil
 }
 
-func runAsync() error {
+func runRepoAsync() error {
 	self, err := os.Executable()
 	if err != nil {
 		return err
 	}
-
-	cmd := exec.Command(self, "repo")
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	cmd := newBgCmd(self, "repo")
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start async review: %w", err)
+		return fmt.Errorf("start async repo review: %w", err)
 	}
-
 	go func() { _ = cmd.Wait() }()
 	fmt.Fprintln(os.Stderr, "lm-review: deep repo review running in background")
 	return nil
 }
 
-func printResult(r *review.Result) {
-	icon := map[review.Verdict]string{
-		review.VerdictPass:  "✅",
-		review.VerdictWarn:  "⚠️",
-		review.VerdictBlock: "🚫",
-	}[r.Verdict]
-
-	fmt.Fprintf(os.Stderr, "\nlm-review [%s] %s %s: %s\n", r.Model, icon, strings.ToUpper(string(r.Verdict)), r.Summary)
-
-	for _, issue := range r.Issues {
-		fmt.Fprintf(os.Stderr, "  %s:%d [%s] %s\n", issue.File, issue.Line, issue.Rule, issue.Message)
-	}
-
-	fmt.Fprintln(os.Stderr)
-}
-
-func stagedDiff() (string, error) {
-	out, err := exec.Command("git", "diff", "--cached").Output()
-	if err != nil {
-		return "", fmt.Errorf("git diff --cached: %w", err)
-	}
-
-	return string(out), nil
-}
-
-func prDiff() (string, error) {
-	out, err := exec.Command("git", "diff", "main...HEAD").Output()
-	if err != nil {
-		out, err = exec.Command("git", "diff", "origin/main...HEAD").Output()
-		if err != nil {
-			return "", fmt.Errorf("git diff vs main: %w", err)
-		}
-	}
-
-	return string(out), nil
-}
-
-func repoSnapshot() (string, error) {
-	out, err := exec.Command("git", "ls-files", "*.go").Output()
-	if err != nil {
-		return "", fmt.Errorf("git ls-files: %w", err)
-	}
-
-	files := strings.Split(strings.TrimSpace(string(out)), "\n")
-	var sb strings.Builder
-
-	for _, f := range files {
-		if f == "" {
-			continue
-		}
-
-		content, err := os.ReadFile(f)
-		if err != nil {
-			continue
-		}
-
-		fmt.Fprintf(&sb, "// FILE: %s\n%s\n\n", f, content)
-	}
-
-	return sb.String(), nil
+func mustExecPath() string {
+	p, _ := os.Executable()
+	return p
 }

@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package lmreview;
+
+option go_package = "goodkind.io/lm-review/api/reviewpb";
+
+service LMReviewD {
+  rpc ReviewDiff(ReviewRequest) returns (ReviewResponse);
+  rpc ReviewPR(ReviewRequest) returns (ReviewResponse);
+  rpc ReviewRepo(ReviewRequest) returns (ReviewResponse);
+}
+
+message ReviewRequest {
+  string diff    = 1;
+  bool   deep    = 2;
+  string context = 3; // optional extra context (e.g. PR title)
+}
+
+message ReviewResponse {
+  string verdict  = 1; // pass | warn | block
+  string summary  = 2;
+  string model    = 3;
+  int64  latency_ms = 4;
+  repeated Issue issues = 5;
+}
+
+message Issue {
+  string severity = 1; // error | warning | info
+  string file     = 2;
+  int32  line     = 3;
+  string rule     = 4;
+  string message  = 5;
+}
