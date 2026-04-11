@@ -56,9 +56,11 @@ func FilesFromDiff(diff string) []string {
 }
 
 // ruleApplies returns true when a rule should be included given the files present.
-// Rules with no globs always apply. Rules with globs apply when at least one file matches.
-func ruleApplies(globs []string, files []string) bool {
-	if len(globs) == 0 {
+// always = true forces inclusion regardless of globs.
+// No globs = always applies.
+// Globs set = applies when at least one file matches.
+func ruleApplies(globs []string, always bool, files []string) bool {
+	if always || len(globs) == 0 {
 		return true
 	}
 	for _, g := range globs {
@@ -90,16 +92,21 @@ func BuildSystemPrompt(rules []string) string {
 	return sb.String()
 }
 
-// FilterRules returns only the rule texts whose globs match the given files.
-// Rules with no globs always pass through.
-func FilterRules(ruleTexts []string, ruleGlobs [][]string, files []string) []string {
+// RuleFilter carries the glob and always metadata for a single rule.
+type RuleFilter struct {
+	Globs  []string
+	Always bool
+}
+
+// FilterRules returns only the rule texts that apply to the given files.
+func FilterRules(ruleTexts []string, filters []RuleFilter, files []string) []string {
 	out := make([]string, 0, len(ruleTexts))
 	for i, text := range ruleTexts {
-		var globs []string
-		if i < len(ruleGlobs) {
-			globs = ruleGlobs[i]
+		var f RuleFilter
+		if i < len(filters) {
+			f = filters[i]
 		}
-		if ruleApplies(globs, files) {
+		if ruleApplies(f.Globs, f.Always, files) {
 			out = append(out, text)
 		}
 	}

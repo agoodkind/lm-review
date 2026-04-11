@@ -28,9 +28,11 @@ type LMStudio struct {
 // Rule is a single review instruction sent to the LLM.
 // If Globs is set, the rule is only included when the diff or repo contains
 // files matching at least one glob. Rules with no Globs always apply.
+// Always = true forces the rule to apply even when Globs is also set.
 type Rule struct {
-	Text  string   `toml:"text"`
-	Globs []string `toml:"globs,omitempty"`
+	Text   string   `toml:"text"`
+	Globs  []string `toml:"globs,omitempty"`
+	Always bool     `toml:"always,omitempty"`
 }
 
 // Load reads config from the XDG config path.

@@ -90,13 +90,13 @@ func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.Revi
 
 	// Extract texts and globs from config rules, then filter to files in this diff.
 	texts := make([]string, len(s.cfg.Rules))
-	globs := make([][]string, len(s.cfg.Rules))
+	filters := make([]review.RuleFilter, len(s.cfg.Rules))
 	for i, r := range s.cfg.Rules {
 		texts[i] = r.Text
-		globs[i] = r.Globs
+		filters[i] = review.RuleFilter{Globs: r.Globs, Always: r.Always}
 	}
 	files := review.FilesFromDiff(req.Diff)
-	rules := review.FilterRules(texts, globs, files)
+	rules := review.FilterRules(texts, filters, files)
 
 	var (
 		result *review.Result
