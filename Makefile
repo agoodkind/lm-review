@@ -30,8 +30,9 @@ CMD    := ./cmd/$(BINARY)
 
 .PHONY: build deploy clean review-diff review-pr review-repo
 
-build: review-diff
+build:
 	go build $(CMD)
+	@command -v lm-review >/dev/null 2>&1 && lm-review diff || true
 
 deploy:
 	go install $(CMD)
@@ -40,11 +41,18 @@ deploy:
 clean:
 	rm -f $(BINARY)
 
+setup-hooks:
+	git config core.hooksPath .githooks
+	@echo "git hooks configured"
+
 review-diff:
-	@lm-review diff || true
+	lm-review diff
 
 review-pr:
-	@lm-review pr || true
+	lm-review pr
+
+review-deep:
+	lm-review diff --deep &
 
 review-repo:
-	@lm-review repo --async || true
+	lm-review repo --async

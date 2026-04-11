@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Async deep review after every commit.
+# Posts result as a PR comment when done.
+command -v lm-review >/dev/null 2>&1 || exit 0
+lm-review diff --deep &

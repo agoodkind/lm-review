@@ -40,6 +40,7 @@ func (r *Reviewer) ReviewDiff(ctx context.Context, diff string) (*Result, error)
 	}
 
 	result.Scope = r.scope
+	result.Model = r.client.ModelID()
 	return result, nil
 }
 
@@ -59,5 +60,6 @@ func (r *Reviewer) ReviewRepo(ctx context.Context, files string) (*Result, error
 	}
 
 	result.Scope = r.scope
+	result.Model = r.client.ModelID()
 	return result, nil
 }
