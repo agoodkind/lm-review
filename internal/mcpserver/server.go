@@ -4,8 +4,8 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"log"
 	"os/exec"
 	"strings"
 
@@ -17,116 +17,89 @@ import (
 
 // Serve starts the MCP stdio server and blocks until the client disconnects.
 func Serve(ctx context.Context) error {
-	server := mcp.NewServer(&mcp.Implementation{Name: "lm-review", Version: "1.0.0"}, nil)
+	s := mcp.NewServer(&mcp.Implementation{Name: "lm-review", Version: "1.0.0"}, nil)
 
-	server.AddTool(
-		&mcp.Tool{
-			Name:        "review_diff",
-			Description: "Review staged git changes for code quality, style, and correctness.",
-			InputSchema: json.RawMessage(`{
-				"type": "object",
-				"properties": {
-					"deep": {"type": "boolean", "description": "Use the deep model (slower, more thorough)"}
-				}
-			}`),
+	type DiffInput struct {
+		Deep bool `json:"deep" jsonschema:"use the deep model (slower, more thorough)"`
+	}
+	type PRInput struct {
+		Deep bool `json:"deep" jsonschema:"use the deep model (slower, more thorough)"`
+	}
+	type RepoInput struct{}
+
+	mcp.AddTool(s,
+		&mcp.Tool{Name: "review_diff", Description: "Review staged git changes for code quality, style, and correctness."},
+		func(ctx context.Context, req *mcp.CallToolRequest, in DiffInput) (*mcp.CallToolResult, ReviewOutput, error) {
+			diff, err := gitOutput("diff", "--cached")
+			if err != nil {
+				return nil, ReviewOutput{}, fmt.Errorf("git diff: %w", err)
+			}
+			resp, err := callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
+				return c.ReviewDiff(ctx, diff, in.Deep)
+			})
+			if err != nil {
+				return nil, ReviewOutput{}, err
+			}
+			out := toOutput(resp)
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: out.Markdown}}}, out, nil
 		},
-		handleReviewDiff,
 	)
 
-	server.AddTool(
-		&mcp.Tool{
-			Name:        "review_pr",
-			Description: "Review all changes on the current branch vs main.",
-			InputSchema: json.RawMessage(`{
-				"type": "object",
-				"properties": {
-					"deep": {"type": "boolean", "description": "Use the deep model (slower, more thorough)"}
-				}
-			}`),
+	mcp.AddTool(s,
+		&mcp.Tool{Name: "review_pr", Description: "Review all changes on the current branch vs main."},
+		func(ctx context.Context, req *mcp.CallToolRequest, in PRInput) (*mcp.CallToolResult, ReviewOutput, error) {
+			diff, err := prDiff()
+			if err != nil {
+				return nil, ReviewOutput{}, fmt.Errorf("git diff vs main: %w", err)
+			}
+			resp, err := callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
+				return c.ReviewPR(ctx, diff, in.Deep)
+			})
+			if err != nil {
+				return nil, ReviewOutput{}, err
+			}
+			out := toOutput(resp)
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: out.Markdown}}}, out, nil
 		},
-		handleReviewPR,
 	)
 
-	server.AddTool(
-		&mcp.Tool{
-			Name:        "review_repo",
-			Description: "Full repository health review: tech debt, structural issues, improvement opportunities.",
-			InputSchema: json.RawMessage(`{"type": "object", "properties": {}}`),
+	mcp.AddTool(s,
+		&mcp.Tool{Name: "review_repo", Description: "Full repository health review: tech debt, structural issues, improvement opportunities."},
+		func(ctx context.Context, req *mcp.CallToolRequest, in RepoInput) (*mcp.CallToolResult, ReviewOutput, error) {
+			files, err := repoSnapshot()
+			if err != nil {
+				return nil, ReviewOutput{}, fmt.Errorf("repo snapshot: %w", err)
+			}
+			resp, err := callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
+				return c.ReviewRepo(ctx, files, true)
+			})
+			if err != nil {
+				return nil, ReviewOutput{}, err
+			}
+			out := toOutput(resp)
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: out.Markdown}}}, out, nil
 		},
-		handleReviewRepo,
 	)
 
-	ss, err := server.Connect(ctx, &mcp.StdioTransport{}, nil)
-	if err != nil {
-		return fmt.Errorf("mcp connect: %w", err)
+	if err := s.Run(ctx, &mcp.StdioTransport{}); err != nil {
+		log.Fatal(err)
 	}
-
-	return ss.Wait()
+	return nil
 }
 
-func handleReviewDiff(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	var args struct {
-		Deep bool `json:"deep"`
-	}
-	_ = json.Unmarshal(req.Params.Arguments, &args)
-
-	diff, err := gitOutput("diff", "--cached")
-	if err != nil {
-		return errResult(fmt.Sprintf("git diff --cached: %v", err)), nil
-	}
-
-	return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-		return c.ReviewDiff(ctx, diff, args.Deep)
-	})
-}
-
-func handleReviewPR(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	var args struct {
-		Deep bool `json:"deep"`
-	}
-	_ = json.Unmarshal(req.Params.Arguments, &args)
-
-	diff, err := prDiff()
-	if err != nil {
-		return errResult(err.Error()), nil
-	}
-
-	return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-		return c.ReviewPR(ctx, diff, args.Deep)
-	})
-}
-
-func handleReviewRepo(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	files, err := repoSnapshot()
-	if err != nil {
-		return errResult(err.Error()), nil
-	}
-
-	return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-		return c.ReviewRepo(ctx, files, true)
-	})
-}
-
-func callDaemon(ctx context.Context, fn func(*daemon.Client) (*reviewpb.ReviewResponse, error)) (*mcp.CallToolResult, error) {
+func callDaemon(ctx context.Context, fn func(*daemon.Client) (*reviewpb.ReviewResponse, error)) (*reviewpb.ReviewResponse, error) {
 	client, err := daemon.Connect(ctx)
 	if err != nil {
-		return errResult(fmt.Sprintf("lm-review daemon unavailable: %v", err)), nil
+		return nil, fmt.Errorf("lm-review daemon unavailable: %w", err)
 	}
 	defer client.Close()
-
-	resp, err := fn(client)
-	if err != nil {
-		return errResult(err.Error()), nil
-	}
-
-	return okResult(resp), nil
+	return fn(client)
 }
 
-func okResult(resp *reviewpb.ReviewResponse) *mcp.CallToolResult {
+func toOutput(resp *reviewpb.ReviewResponse) ReviewOutput {
 	icon := map[string]string{"pass": "✅", "warn": "⚠️", "block": "🚫"}[resp.Verdict]
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%s **%s** (%s, %dms): %s", icon, strings.ToUpper(resp.Verdict), resp.Model, resp.LatencyMs, resp.Summary)
-
 	if len(resp.Issues) > 0 {
 		sb.WriteString("\n\n| Severity | File | Line | Rule | Message |\n|---|---|---|---|---|\n")
 		for _, issue := range resp.Issues {
@@ -134,17 +107,17 @@ func okResult(resp *reviewpb.ReviewResponse) *mcp.CallToolResult {
 			fmt.Fprintf(&sb, "| %s | `%s` | %d | %s | %s |\n", sevIcon, issue.File, issue.Line, issue.Rule, issue.Message)
 		}
 	}
-
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: sb.String()}},
+	return ReviewOutput{
+		Verdict:  resp.Verdict,
+		Summary:  resp.Summary,
+		Markdown: sb.String(),
 	}
 }
 
-func errResult(msg string) *mcp.CallToolResult {
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: "❌ " + msg}},
-		IsError: true,
-	}
+type ReviewOutput struct {
+	Verdict  string `json:"verdict"`
+	Summary  string `json:"summary"`
+	Markdown string `json:"markdown"`
 }
 
 func gitOutput(args ...string) (string, error) {
@@ -171,11 +144,9 @@ func repoSnapshot() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("git ls-files: %w", err)
 	}
-
 	files := strings.Split(strings.TrimSpace(string(out)), "\n")
 	var sb strings.Builder
 	const maxBytes = 80_000
-
 	for _, f := range files {
 		if f == "" {
 			continue
@@ -191,6 +162,5 @@ func repoSnapshot() (string, error) {
 		}
 		sb.WriteString(entry)
 	}
-
 	return sb.String(), nil
 }
