@@ -1,0 +1,9 @@
+/lm-review
+.make/
+dist/
+*.test
+*.out
+coverage.*
+go.work
+go.work.sum
+.env
