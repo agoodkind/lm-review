@@ -5,7 +5,6 @@ package mcpserver
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -13,7 +12,10 @@ import (
 
 	"goodkind.io/lm-review/api/reviewpb"
 	"goodkind.io/lm-review/internal/daemon"
+	"goodkind.io/lm-review/internal/gitutil"
 )
+
+const repoMaxBytes = 80_000
 
 // Serve starts the MCP stdio server and blocks until the client disconnects.
 func Serve(ctx context.Context) error {
@@ -27,15 +29,15 @@ func Serve(ctx context.Context) error {
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			deep := req.GetBool("deep", false)
-			repoPath, err := resolveRepo(req.GetString("path", ""))
+			repoRoot, err := gitutil.Root(req.GetString("path", ""))
 			if err != nil {
 				return mcp.NewToolResultText(err.Error()), nil
 			}
-			diff, err := gitIn(repoPath, "diff", "--cached")
+			diff, err := gitutil.StagedDiff(repoRoot)
 			if err != nil || strings.TrimSpace(diff) == "" {
 				return mcp.NewToolResultText("No staged changes to review. Stage files with `git add` first."), nil
 			}
-			return runReview(ctx, diff, deep, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
+			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
 				return c.ReviewDiff(ctx, diff, deep)
 			})
 		},
@@ -49,15 +51,15 @@ func Serve(ctx context.Context) error {
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			deep := req.GetBool("deep", false)
-			repoPath, err := resolveRepo(req.GetString("path", ""))
+			repoRoot, err := gitutil.Root(req.GetString("path", ""))
 			if err != nil {
 				return mcp.NewToolResultText(err.Error()), nil
 			}
-			diff, err := prDiffIn(repoPath)
+			diff, err := gitutil.PRDiff(repoRoot)
 			if err != nil || strings.TrimSpace(diff) == "" {
 				return mcp.NewToolResultText("No changes vs main branch, or main branch not found."), nil
 			}
-			return runReview(ctx, diff, deep, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
+			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
 				return c.ReviewPR(ctx, diff, deep)
 			})
 		},
@@ -69,15 +71,15 @@ func Serve(ctx context.Context) error {
 			mcp.WithString("path", mcp.Description("Path to git repo root (optional, auto-detected if omitted).")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			repoPath, err := resolveRepo(req.GetString("path", ""))
+			repoRoot, err := gitutil.Root(req.GetString("path", ""))
 			if err != nil {
 				return mcp.NewToolResultText(err.Error()), nil
 			}
-			files, err := repoSnapshotIn(repoPath)
+			files, err := gitutil.RepoSnapshot(repoRoot, repoMaxBytes)
 			if err != nil || strings.TrimSpace(files) == "" {
 				return mcp.NewToolResultText("No Go files found in repo."), nil
 			}
-			return runReview(ctx, files, true, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
+			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
 				return c.ReviewRepo(ctx, files, true)
 			})
 		},
@@ -86,20 +88,7 @@ func Serve(ctx context.Context) error {
 	return server.ServeStdio(s)
 }
 
-// resolveRepo returns the git repo root to use. If explicit is non-empty it's
-// used directly. Otherwise we auto-detect from CWD via git rev-parse.
-func resolveRepo(explicit string) (string, error) {
-	if explicit != "" {
-		return explicit, nil
-	}
-	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		return "", fmt.Errorf("not in a git repo and no path provided. Pass path='/path/to/repo' to specify one")
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func runReview(ctx context.Context, content string, _ bool, fn func(*daemon.Client) (*reviewpb.ReviewResponse, error)) (*mcp.CallToolResult, error) {
+func callDaemon(ctx context.Context, fn func(*daemon.Client) (*reviewpb.ReviewResponse, error)) (*mcp.CallToolResult, error) {
 	client, err := daemon.Connect(ctx)
 	if err != nil {
 		return mcp.NewToolResultText(fmt.Sprintf("lm-review daemon unavailable (is LM Studio running?): %v", err)), nil
@@ -126,47 +115,4 @@ func formatResponse(resp *reviewpb.ReviewResponse) string {
 		}
 	}
 	return sb.String()
-}
-
-func gitIn(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	out, err := cmd.Output()
-	return string(out), err
-}
-
-func prDiffIn(dir string) (string, error) {
-	out, err := exec.Command("git", "-C", dir, "diff", "main...HEAD").Output()
-	if err != nil {
-		out, err = exec.Command("git", "-C", dir, "diff", "origin/main...HEAD").Output()
-		if err != nil {
-			return "", fmt.Errorf("git diff vs main: %w", err)
-		}
-	}
-	return string(out), nil
-}
-
-func repoSnapshotIn(dir string) (string, error) {
-	out, err := exec.Command("git", "-C", dir, "ls-files", "*.go").Output()
-	if err != nil {
-		return "", fmt.Errorf("git ls-files: %w", err)
-	}
-	files := strings.Split(strings.TrimSpace(string(out)), "\n")
-	var sb strings.Builder
-	const maxBytes = 80_000
-	for _, f := range files {
-		if f == "" {
-			continue
-		}
-		content, readErr := exec.Command("git", "-C", dir, "show", "HEAD:"+f).Output()
-		if readErr != nil {
-			continue
-		}
-		entry := fmt.Sprintf("// FILE: %s\n%s\n\n", f, content)
-		if sb.Len()+len(entry) > maxBytes {
-			fmt.Fprintf(&sb, "// ... truncated at %d bytes\n", maxBytes)
-			break
-		}
-		sb.WriteString(entry)
-	}
-	return sb.String(), nil
 }

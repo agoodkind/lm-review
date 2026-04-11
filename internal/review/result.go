@@ -225,20 +225,19 @@ func (r *Result) Text() string {
 					"error": "✗", "warning": "⚠", "info": "·",
 				}[issue.Severity]
 
-				lineRef := fmt.Sprintf(":%d", issue.Line)
+				lineRef := fmt.Sprintf("%d", issue.Line)
 				if issue.EndLine > issue.Line {
-					lineRef = fmt.Sprintf(":%d-%d", issue.Line, issue.EndLine)
+					lineRef = fmt.Sprintf("%d-%d", issue.Line, issue.EndLine)
 				}
 
-				fmt.Fprintf(&b, "    %s%s%s %s[%s]%s %s\n",
+				fmt.Fprintf(&b, "    %s%s%s %s[%s:%s]%s %s\n",
 					sevColor, sevIcon, reset,
-					dim, issue.Rule, reset,
+					dim, issue.Rule, lineRef, reset,
 					issue.Message)
 
 				if issue.Suggestion != "" {
 					fmt.Fprintf(&b, "      %s→ %s%s\n", dim, issue.Suggestion, reset)
 				}
-				_ = lineRef
 			}
 			b.WriteString("\n")
 		}
@@ -326,7 +325,7 @@ func (r *Result) Markdown() string {
 				}[issue.Severity]
 				lineRef := fmt.Sprintf("%d", issue.Line)
 				if issue.EndLine > issue.Line {
-					lineRef = fmt.Sprintf("%d–%d", issue.Line, issue.EndLine)
+					lineRef = fmt.Sprintf("%d-%d", issue.Line, issue.EndLine)
 				}
 				suggestion := issue.Suggestion
 				if suggestion == "" {
