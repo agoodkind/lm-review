@@ -1,0 +1,64 @@
+# lm-review configuration example.
+# Copy to ~/.config/lm-review/config.toml and adjust to your setup.
+# Run `lm-review init` to auto-detect backend and models.
+
+[lmstudio]
+url        = "http://localhost:1234"  # LM Studio, ollama (:11434), or OpenAI
+token      = ""                        # API token - required for LM Studio, "ollama" for ollama
+fast_model = ""                        # Small/fast model for diff/pr reviews on every build
+deep_model = ""                        # Large model for repo-wide reviews
+
+# Review rules sent to the LLM as part of every review prompt.
+# Add, remove, or reword rules to match your team's standards.
+# Each rule is a plain English instruction enforced during review.
+
+[[rules]]
+text = "No emdashes or en-dashes in any comments or strings."
+
+[[rules]]
+text = "Use slog for all logging. Never use fmt.Fprintf(os.Stderr) for diagnostics."
+
+[[rules]]
+text = "All config must be TOML. No JSON for user-facing config files."
+
+[[rules]]
+text = "Flag duplicated logic. Consolidate it."
+
+[[rules]]
+text = "Each function and file should have one responsibility. Flag violations."
+
+[[rules]]
+text = "Prefer readable code over clever code. Verbose is fine. Magic is not."
+
+[[rules]]
+text = "Is there already a standard library or well-known package for this? Flag reinvention."
+
+[[rules]]
+text = "Is there a fundamentally better approach to this problem? Flag it."
+
+[[rules]]
+text = "Use the latest stable dependency versions."
+
+[[rules]]
+text = "Does the overall change make sense in context? Flag anything that seems off."
+
+[[rules]]
+text = "Flag silently swallowed errors such as _ = err."
+
+[[rules]]
+text = "Flag missing or misleading comments."
+
+[[rules]]
+text = "Flag any hardcoded secrets, credentials, API keys, tokens, private keys, certificates, passwords, or connection strings with embedded credentials. Flag even if the value looks like a placeholder. The correct pattern is always a secrets manager, environment variable, or vault reference."
+
+[[rules]]
+text = "Flag security issues. This includes injection and path traversal."
+
+[[rules]]
+text = "Flag performance issues. This includes unnecessary allocations and quadratic complexity in hot paths."
+
+[[rules]]
+text = "No IPv4 literals. Use domain names or IPv6 literals."
+
+[[rules]]
+text = "Documentation should describe intent and behavior, not implementation. Flag anything that will become stale as code evolves."
