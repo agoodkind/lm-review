@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "lm-review": {
+      "type": "stdio",
+      "command": "lm-review",
+      "args": ["mcp"]
+    }
+  }
+}

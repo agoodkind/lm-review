@@ -91,9 +91,17 @@ func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.Revi
 	}
 
 	client := lmstudio.New(s.cfg.LMStudio.URL, s.cfg.LMStudio.Token, model)
-	r := review.New(client, scope)
 
-	result, err := r.ReviewDiff(ctx, req.Diff)
+	var (
+		result *review.Result
+		err    error
+	)
+	if scope == "repo" && len(req.Diff) > 80_000 {
+		result, err = review.ChunkedRepoReview(ctx, client, req.Diff, scope)
+	} else {
+		r := review.New(client, scope)
+		result, err = r.ReviewDiff(ctx, req.Diff)
+	}
 
 	latency := time.Since(start).Milliseconds()
 
@@ -123,11 +131,15 @@ func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.Revi
 
 	for _, issue := range result.Issues {
 		resp.Issues = append(resp.Issues, &reviewpb.Issue{
-			Severity: issue.Severity,
-			File:     issue.File,
-			Line:     int32(issue.Line),
-			Rule:     issue.Rule,
-			Message:  issue.Message,
+			Severity:   issue.Severity,
+			File:       issue.File,
+			Line:       int32(issue.Line),
+			EndLine:    int32(issue.EndLine),
+			Rule:       issue.Rule,
+			Message:    issue.Message,
+			Category:   string(issue.Category),
+			Suggestion: issue.Suggestion,
+			Confidence: string(issue.Confidence),
 		})
 	}
 

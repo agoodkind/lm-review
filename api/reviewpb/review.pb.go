@@ -164,6 +164,10 @@ type Issue struct {
 	Line          int32                  `protobuf:"varint,3,opt,name=line,proto3" json:"line,omitempty"`
 	Rule          string                 `protobuf:"bytes,4,opt,name=rule,proto3" json:"rule,omitempty"`
 	Message       string                 `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`
+	Category      string                 `protobuf:"bytes,6,opt,name=category,proto3" json:"category,omitempty"` // style | security | performance | ...
+	EndLine       int32                  `protobuf:"varint,7,opt,name=end_line,json=endLine,proto3" json:"end_line,omitempty"`
+	Suggestion    string                 `protobuf:"bytes,8,opt,name=suggestion,proto3" json:"suggestion,omitempty"`
+	Confidence    string                 `protobuf:"bytes,9,opt,name=confidence,proto3" json:"confidence,omitempty"` // high | medium | low
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -233,6 +237,34 @@ func (x *Issue) GetMessage() string {
 	return ""
 }
 
+func (x *Issue) GetCategory() string {
+	if x != nil {
+		return x.Category
+	}
+	return ""
+}
+
+func (x *Issue) GetEndLine() int32 {
+	if x != nil {
+		return x.EndLine
+	}
+	return 0
+}
+
+func (x *Issue) GetSuggestion() string {
+	if x != nil {
+		return x.Suggestion
+	}
+	return ""
+}
+
+func (x *Issue) GetConfidence() string {
+	if x != nil {
+		return x.Confidence
+	}
+	return ""
+}
+
 var File_review_proto protoreflect.FileDescriptor
 
 const file_review_proto_rawDesc = "" +
@@ -248,13 +280,21 @@ const file_review_proto_rawDesc = "" +
 	"\x05model\x18\x03 \x01(\tR\x05model\x12\x1d\n" +
 	"\n" +
 	"latency_ms\x18\x04 \x01(\x03R\tlatencyMs\x12'\n" +
-	"\x06issues\x18\x05 \x03(\v2\x0f.lmreview.IssueR\x06issues\"y\n" +
+	"\x06issues\x18\x05 \x03(\v2\x0f.lmreview.IssueR\x06issues\"\xf0\x01\n" +
 	"\x05Issue\x12\x1a\n" +
 	"\bseverity\x18\x01 \x01(\tR\bseverity\x12\x12\n" +
 	"\x04file\x18\x02 \x01(\tR\x04file\x12\x12\n" +
 	"\x04line\x18\x03 \x01(\x05R\x04line\x12\x12\n" +
 	"\x04rule\x18\x04 \x01(\tR\x04rule\x12\x18\n" +
-	"\amessage\x18\x05 \x01(\tR\amessage2\xcc\x01\n" +
+	"\amessage\x18\x05 \x01(\tR\amessage\x12\x1a\n" +
+	"\bcategory\x18\x06 \x01(\tR\bcategory\x12\x19\n" +
+	"\bend_line\x18\a \x01(\x05R\aendLine\x12\x1e\n" +
+	"\n" +
+	"suggestion\x18\b \x01(\tR\n" +
+	"suggestion\x12\x1e\n" +
+	"\n" +
+	"confidence\x18\t \x01(\tR\n" +
+	"confidence2\xcc\x01\n" +
 	"\tLMReviewD\x12?\n" +
 	"\n" +
 	"ReviewDiff\x12\x17.lmreview.ReviewRequest\x1a\x18.lmreview.ReviewResponse\x12=\n" +

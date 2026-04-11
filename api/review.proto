@@ -25,9 +25,13 @@ message ReviewResponse {
 }
 
 message Issue {
-  string severity = 1; // error | warning | info
-  string file     = 2;
-  int32  line     = 3;
-  string rule     = 4;
-  string message  = 5;
+  string severity   = 1; // error | warning | info
+  string file       = 2;
+  int32  line       = 3;
+  string rule       = 4;
+  string message    = 5;
+  string category   = 6; // style | security | performance | ...
+  int32  end_line   = 7;
+  string suggestion = 8;
+  string confidence = 9; // high | medium | low
 }

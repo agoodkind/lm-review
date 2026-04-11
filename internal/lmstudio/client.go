@@ -43,6 +43,11 @@ func (c *Client) Chat(ctx context.Context, messages []openai.ChatCompletionMessa
 	return resp.Choices[0].Message.Content, nil
 }
 
+// ModelID returns the model identifier this client is configured to use.
+func (c *Client) ModelID() string {
+	return c.model
+}
+
 // Ping checks the server is reachable and the token is valid.
 func (c *Client) Ping(ctx context.Context) error {
 	_, err := c.inner.Models.List(ctx)
