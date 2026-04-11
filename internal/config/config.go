@@ -4,9 +4,10 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+
+	"goodkind.io/lm-review/internal/xdg"
 )
 
 // Config is the top-level configuration.
@@ -23,12 +24,13 @@ type LMStudio struct {
 	DeepModel string `toml:"deep_model"`
 }
 
-// Load reads config from XDG_CONFIG_HOME/lm-review/config.toml.
+// Load reads config from the XDG config path.
+// Returns a helpful error if the config does not exist yet.
 func Load() (*Config, error) {
-	path := ConfigPath()
+	path := xdg.ConfigPath()
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil, fmt.Errorf("no config found at %s — run 'lm-review init' to create one", path)
+		return nil, fmt.Errorf("no config found at %s\n\nRun: lm-review init", path)
 	}
 
 	var cfg Config
@@ -41,31 +43,4 @@ func Load() (*Config, error) {
 	}
 
 	return &cfg, nil
-}
-
-// WriteDefault writes a starter config to ConfigPath.
-func WriteDefault(token string) error {
-	path := ConfigPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
-	}
-
-	content := fmt.Sprintf(`[lmstudio]
-url        = "http://localhost:1234"
-token      = %q
-fast_model = "qwen3-coder-30b-a3b-instruct-dwq-lr9e8"
-deep_model = "qwen3.5-122b-a10b-text-qx85-mlx"
-`, token)
-
-	return os.WriteFile(path, []byte(content), 0o600)
-}
-
-// ConfigPath returns the XDG config path for lm-review.
-func ConfigPath() string {
-	base := os.Getenv("XDG_CONFIG_HOME")
-	if base == "" {
-		home, _ := os.UserHomeDir()
-		base = filepath.Join(home, ".config")
-	}
-	return filepath.Join(base, "lm-review", "config.toml")
 }

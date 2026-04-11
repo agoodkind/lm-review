@@ -39,6 +39,11 @@ func RuntimeDir() string {
 	return filepath.Join("/tmp", app)
 }
 
+// ConfigPath returns the path to config.toml.
+func ConfigPath() string {
+	return filepath.Join(ConfigDir(), "config.toml")
+}
+
 // AuditLogPath returns the path to the audit log.
 func AuditLogPath() string {
 	return filepath.Join(StateDir(), "audit.jsonl")

@@ -141,26 +141,6 @@ func newMCPCmd() *cobra.Command {
 	}
 }
 
-func newInitCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "init",
-		Short: "Create default config at XDG config path",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			p, _ := os.Executable()
-			fmt.Printf(`Add to ~/.claude.json mcpServers:
-
-{
-  "lm-review": {
-    "type": "stdio",
-    "command": %q,
-    "args": ["mcp"]
-  }
-}
-`, p)
-			return nil
-		},
-	}
-}
 
 func runReview(ctx context.Context, scope, diff string, deep bool) error {
 	client, err := daemon.Connect(ctx)
