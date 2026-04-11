@@ -26,7 +26,7 @@ sync:
 BINARY := lm-review
 CMD    := ./cmd/$(BINARY)
 
-.DEFAULT_GOAL := build
+.DEFAULT_GOAL := check
 
 .PHONY: build deploy clean review-diff review-pr review-repo
 
