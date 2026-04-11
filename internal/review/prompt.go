@@ -41,3 +41,4 @@ func DiffPrompt(diff string) string {
 func RepoPrompt(files string) string {
 	return "Review this codebase for structural issues, tech debt, and improvement opportunities:\n\n" + files
 }
+

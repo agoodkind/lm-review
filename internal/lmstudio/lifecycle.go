@@ -3,6 +3,7 @@ package lmstudio
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"strings"
 	"time"
@@ -12,8 +13,8 @@ const lmsCLI = "/Applications/LM Studio.app/Contents/Resources/app/.webpack/lms"
 
 // EnsureReady ensures the LM Studio server is running and the given model is loaded.
 // This enables fully headless operation - no LM Studio GUI required.
-func EnsureReady(ctx context.Context, model string) error {
-	if err := ensureServerRunning(ctx); err != nil {
+func EnsureReady(ctx context.Context, baseURL, token, model string) error {
+	if err := ensureServerRunning(ctx, baseURL, token); err != nil {
 		return fmt.Errorf("start LM Studio server: %w", err)
 	}
 	if err := ensureModelLoaded(ctx, model); err != nil {
@@ -22,20 +23,37 @@ func EnsureReady(ctx context.Context, model string) error {
 	return nil
 }
 
-// ensureServerRunning starts the LM Studio server if it isn't already running.
-func ensureServerRunning(ctx context.Context) error {
-	out, err := exec.CommandContext(ctx, lmsCLI, "server", "status").Output()
-	if err == nil && strings.Contains(string(out), "running") {
+// ensureServerRunning checks the HTTP API directly - more reliable than lms CLI IPC.
+func ensureServerRunning(ctx context.Context, baseURL, token string) error {
+	if pingServer(ctx, baseURL, token) {
 		return nil
 	}
 
-	startOut, startErr := exec.CommandContext(ctx, lmsCLI, "server", "start").CombinedOutput()
-	if startErr != nil {
-		return fmt.Errorf("lms server start: %w: %s", startErr, startOut)
+	// Server not responding - try to start it via lms CLI.
+	out, err := exec.CommandContext(ctx, lmsCLI, "server", "start").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("lms server start: %w: %s", err, out)
 	}
 
 	// Wait for server to accept connections.
-	return waitForServer(ctx, 15*time.Second)
+	return waitForServer(ctx, baseURL, token, 15*time.Second)
+}
+
+// pingServer returns true if the LM Studio HTTP API is reachable.
+func pingServer(ctx context.Context, baseURL, token string) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/v1/models", nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode < 500
 }
 
 // ensureModelLoaded loads the model if it isn't already in memory.
@@ -47,7 +65,7 @@ func ensureModelLoaded(ctx context.Context, model string) error {
 
 	for _, m := range loaded {
 		if strings.EqualFold(m, model) || strings.HasSuffix(strings.ToLower(m), strings.ToLower(model)) {
-			return nil // already loaded
+			return nil
 		}
 	}
 
@@ -59,9 +77,9 @@ func ensureModelLoaded(ctx context.Context, model string) error {
 	return nil
 }
 
-// loadedModels returns the list of currently loaded model identifiers.
+// loadedModels returns the list of currently loaded model identifiers via lms ps.
 func loadedModels(ctx context.Context) ([]string, error) {
-	out, err := exec.CommandContext(ctx, lmsCLI, "ps").Output()
+	out, err := exec.CommandContext(ctx, lmsCLI, "ps").CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("lms ps: %w", err)
 	}
@@ -69,7 +87,7 @@ func loadedModels(ctx context.Context) ([]string, error) {
 	var models []string
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "LLM") || strings.HasPrefix(line, "EMBEDDING") {
+		if line == "" || strings.HasPrefix(line, "IDENTIFIER") || strings.HasPrefix(line, "No models") {
 			continue
 		}
 		fields := strings.Fields(line)
@@ -81,8 +99,8 @@ func loadedModels(ctx context.Context) ([]string, error) {
 	return models, nil
 }
 
-// waitForServer polls localhost:1234 until the server responds or the timeout elapses.
-func waitForServer(ctx context.Context, timeout time.Duration) error {
+// waitForServer polls the HTTP API until the server responds or timeout.
+func waitForServer(ctx context.Context, baseURL, token string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		select {
@@ -90,9 +108,7 @@ func waitForServer(ctx context.Context, timeout time.Duration) error {
 			return ctx.Err()
 		default:
 		}
-
-		out, err := exec.CommandContext(ctx, lmsCLI, "server", "status").Output()
-		if err == nil && strings.Contains(string(out), "running") {
+		if pingServer(ctx, baseURL, token) {
 			return nil
 		}
 		time.Sleep(500 * time.Millisecond)
