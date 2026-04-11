@@ -2,8 +2,8 @@
   "mcpServers": {
     "lm-review": {
       "type": "stdio",
-      "command": "lm-review",
-      "args": ["mcp"]
+      "command": "go",
+      "args": ["run", "goodkind.io/lm-review/cmd/lm-review@latest", "mcp"]
     }
   }
 }
