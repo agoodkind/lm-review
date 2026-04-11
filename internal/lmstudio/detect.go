@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -15,41 +13,36 @@ import (
 
 // Backend represents a detected LLM backend.
 type Backend struct {
-	Name   string // "LM Studio" | "ollama" | "custom"
+	Name   string
 	URL    string
 	Token  string
 	Models []string
 }
 
 // Detect probes known local endpoints and returns the first reachable one.
-// Order: LM Studio (1234) → ollama (11434).
-func Detect(ctx context.Context) (*Backend, error) {
+// Pass token if the endpoint requires authentication.
+func Detect(ctx context.Context, token string) (*Backend, error) {
 	candidates := []struct {
-		name     string
-		url      string
-		tokenFn  func() string
+		name  string
+		url   string
+		token string
 	}{
-		{"LM Studio", "http://localhost:1234", lmStudioToken},
-		{"ollama", "http://localhost:11434", func() string { return "ollama" }},
+		{"LM Studio", "http://localhost:1234", token},
+		{"ollama", "http://localhost:11434", "ollama"},
 	}
 
 	for _, c := range candidates {
-		token := c.tokenFn()
-		models, err := listModels(ctx, c.url, token)
+		models, err := ListModels(ctx, c.url, c.token)
 		if err == nil {
-			return &Backend{Name: c.name, URL: c.url, Token: token, Models: models}, nil
+			return &Backend{Name: c.name, URL: c.url, Token: c.token, Models: models}, nil
 		}
 	}
 
-	return nil, fmt.Errorf("no LLM backend detected on localhost:1234 or localhost:11434")
+	return nil, fmt.Errorf("no LLM backend found at localhost:1234 or localhost:11434")
 }
 
-// ListModels returns available model IDs for the given endpoint.
-func ListModels(ctx context.Context, url, token string) ([]string, error) {
-	return listModels(ctx, url, token)
-}
-
-func listModels(ctx context.Context, baseURL, token string) ([]string, error) {
+// ListModels returns available model IDs from an OpenAI-compatible endpoint.
+func ListModels(ctx context.Context, baseURL, token string) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/v1/models", nil)
 	if err != nil {
 		return nil, err
@@ -65,6 +58,9 @@ func listModels(ctx context.Context, baseURL, token string) ([]string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, fmt.Errorf("authentication required - pass --token")
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status %d", resp.StatusCode)
 	}
@@ -87,90 +83,33 @@ func listModels(ctx context.Context, baseURL, token string) ([]string, error) {
 	return ids, nil
 }
 
-// lmStudioToken reads the LM Studio API token from its internal credentials file.
-func lmStudioToken() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-
-	type permissionsStore struct {
-		JSON struct {
-			Tokens []struct {
-				ClientIdentifier         string `json:"clientIdentifier"`
-				ClientPasskeySHA512Base64 string `json:"clientPasskeySHA512Base64"`
-			} `json:"tokens"`
-		} `json:"json"`
-	}
-
-	// The lms-key-2 file holds the raw passkey for the built-in client.
-	keyPath := filepath.Join(home, ".lmstudio", ".internal", "lms-key-2")
-	key, err := os.ReadFile(keyPath)
-	if err != nil {
-		return ""
-	}
-
-	// Read the matching clientIdentifier from permissions-store.json.
-	storePath := filepath.Join(home, ".lmstudio", ".internal", "permissions-store.json")
-	data, err := os.ReadFile(storePath)
-	if err != nil {
-		return ""
-	}
-
-	var store permissionsStore
-	if err := json.Unmarshal(data, &store); err != nil {
-		return ""
-	}
-
-	keyStr := strings.TrimSpace(string(key))
-	// The built-in key's identifier matches the first 8 chars of the key.
-	for _, tok := range store.JSON.Tokens {
-		if strings.HasPrefix(keyStr, tok.ClientIdentifier) {
-			return fmt.Sprintf("sk-lm-%s:%s", tok.ClientIdentifier, keyStr[len(tok.ClientIdentifier):])
-		}
-	}
-
-	return ""
-}
-
-// reParamCount matches parameter counts in model names like 30B, 122B, 7b, 3B.
 var reParamCount = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)b`)
-
-// reActiveParams matches MoE active params like A3B, A10B.
 var reActiveParams = regexp.MustCompile(`(?i)-a(\d+(?:\.\d+)?)b`)
 
 // SelectModels picks the best fast and deep models from a list.
-// Fast: smallest effective size with "coder" preference.
-// Deep: largest effective size.
+// Fast: smallest effective size, coder-named preferred.
+// Deep: largest total size.
 func SelectModels(models []string) (fast, deep string) {
 	type scored struct {
-		id          string
-		effectiveB  float64 // effective parameter count (active params for MoE)
-		totalB      float64
-		coderBonus  float64
+		id         string
+		effectiveB float64
+		totalB     float64
+		coderBonus float64
 	}
 
 	var candidates []scored
 	for _, id := range models {
 		lower := strings.ToLower(id)
-
-		// Skip embedding models.
-		if strings.Contains(lower, "embed") || strings.Contains(lower, "nomic") {
+		if strings.Contains(lower, "embed") {
 			continue
 		}
 
 		var totalB, activeB float64
-
-		// Extract total param count.
 		if m := reParamCount.FindStringSubmatch(id); m != nil {
-			v, _ := strconv.ParseFloat(m[1], 64)
-			totalB = v
+			totalB, _ = strconv.ParseFloat(m[1], 64)
 		}
-
-		// Extract active param count (MoE).
 		if m := reActiveParams.FindStringSubmatch(id); m != nil {
-			v, _ := strconv.ParseFloat(m[1], 64)
-			activeB = v
+			activeB, _ = strconv.ParseFloat(m[1], 64)
 		}
 
 		effective := totalB
@@ -178,7 +117,7 @@ func SelectModels(models []string) (fast, deep string) {
 			effective = activeB
 		}
 		if effective == 0 {
-			effective = 1 // unknown size - treat as tiny
+			effective = 1
 		}
 
 		coderBonus := 0.0
@@ -196,17 +135,13 @@ func SelectModels(models []string) (fast, deep string) {
 		return "", ""
 	}
 
-	// Fast: smallest effective size, coder preferred.
 	bestFast := candidates[0]
 	for _, c := range candidates[1:] {
-		fastScore := c.effectiveB - c.coderBonus*5
-		bestScore := bestFast.effectiveB - bestFast.coderBonus*5
-		if fastScore < bestScore {
+		if c.effectiveB-c.coderBonus*5 < bestFast.effectiveB-bestFast.coderBonus*5 {
 			bestFast = c
 		}
 	}
 
-	// Deep: largest total size.
 	bestDeep := candidates[0]
 	for _, c := range candidates[1:] {
 		if c.totalB > bestDeep.totalB {
@@ -214,7 +149,6 @@ func SelectModels(models []string) (fast, deep string) {
 		}
 	}
 
-	// If only one model, use it for both.
 	if len(candidates) == 1 {
 		return bestFast.id, bestFast.id
 	}

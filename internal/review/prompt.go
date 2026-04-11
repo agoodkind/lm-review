@@ -20,6 +20,8 @@ Rules to enforce:
 - Flag missing or misleading comments
 - Flag security issues (injection, path traversal, hardcoded secrets)
 - Flag performance issues (unnecessary allocations, O(n^2) in hot paths)
+- No IPv4 literals in code or strings - use domain names or IPv6 literals
+- Docs (README, comments, CLAUDE.md) must not contain directory trees, specific file paths, or version-specific details that will drift - docs should describe behavior and concepts, not structure
 
 JSON schema:
 {

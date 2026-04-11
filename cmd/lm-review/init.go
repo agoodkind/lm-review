@@ -14,48 +14,70 @@ import (
 )
 
 // InitResult is the structured output of lm-review init.
-// Machine-readable via --json flag.
 type InitResult struct {
-	ConfigPath string `json:"config_path"`
-	Backend    string `json:"backend"`
-	URL        string `json:"url"`
-	FastModel  string `json:"fast_model"`
-	DeepModel  string `json:"deep_model"`
+	ConfigPath string   `json:"config_path"`
+	Backend    string   `json:"backend"`
+	URL        string   `json:"url"`
+	FastModel  string   `json:"fast_model"`
+	DeepModel  string   `json:"deep_model"`
 	Models     []string `json:"models_available"`
 }
 
 func newInitCmd() *cobra.Command {
-	var jsonOut bool
-	var force bool
+	var (
+		jsonOut bool
+		force   bool
+		token   string
+		url     string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Auto-detect backend and write config",
-		Long: `Probes localhost for a running LLM backend (LM Studio, ollama),
-selects fast and deep models automatically, and writes ~/.config/lm-review/config.toml.
+		Short: "Detect backend, select models, write config",
+		Long: `Probes localhost for a running LLM (LM Studio at :1234, ollama at :11434),
+selects fast and deep models automatically, and writes config.toml.
 
-Safe to run repeatedly. Use --force to overwrite an existing config.
-Use --json for machine-readable output.`,
+If the endpoint requires authentication, pass --token.
+To target a specific URL (e.g. OpenAI, remote ollama), pass --url.
+
+Safe to re-run. Use --force to overwrite an existing config.
+Use --json for machine-readable output (useful when called by an agent).`,
+		Example: `  lm-review init
+  lm-review init --token sk-lm-abc:xyz
+  lm-review init --url https://api.openai.com --token sk-...
+  lm-review init --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configPath := xdg.ConfigPath()
 
 			if !force {
 				if _, err := os.Stat(configPath); err == nil {
-					fmt.Fprintf(os.Stderr, "config already exists at %s (use --force to overwrite)\n", configPath)
+					fmt.Fprintf(os.Stderr, "config already exists at %s\nUse --force to overwrite, or edit directly.\n", configPath)
 					return nil
 				}
 			}
 
 			ctx := context.Background()
 
-			backend, err := lmstudio.Detect(ctx)
-			if err != nil {
-				return fmt.Errorf("no LLM backend found: %w\n\nStart LM Studio or ollama, then re-run: lm-review init", err)
+			var backend *lmstudio.Backend
+			var err error
+
+			if url != "" {
+				// Explicit URL - just list models there.
+				models, lerr := lmstudio.ListModels(ctx, url, token)
+				if lerr != nil {
+					return fmt.Errorf("cannot reach %s: %w", url, lerr)
+				}
+				backend = &lmstudio.Backend{Name: "custom", URL: url, Token: token, Models: models}
+			} else {
+				backend, err = lmstudio.Detect(ctx, token)
+				if err != nil {
+					return fmt.Errorf("%w\n\nStart your LLM backend, then re-run.\nOr specify explicitly: lm-review init --url <url> --token <token>", err)
+				}
 			}
 
 			fast, deep := lmstudio.SelectModels(backend.Models)
 			if fast == "" {
-				return fmt.Errorf("no models available at %s - load a model first", backend.URL)
+				return fmt.Errorf("no models found at %s - load a model first", backend.URL)
 			}
 
 			if err := writeConfig(configPath, backend.URL, backend.Token, fast, deep); err != nil {
@@ -77,17 +99,18 @@ Use --json for machine-readable output.`,
 				return enc.Encode(result)
 			}
 
-			fmt.Printf("✅ Config written: %s\n", configPath)
-			fmt.Printf("   Backend:    %s (%s)\n", result.Backend, result.URL)
-			fmt.Printf("   Fast model: %s\n", result.FastModel)
-			fmt.Printf("   Deep model: %s\n", result.DeepModel)
-			fmt.Printf("\nRun: lm-review diff\n")
+			fmt.Printf("config written: %s\n", configPath)
+			fmt.Printf("backend:    %s (%s)\n", result.Backend, result.URL)
+			fmt.Printf("fast model: %s\n", result.FastModel)
+			fmt.Printf("deep model: %s\n", result.DeepModel)
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output result as JSON")
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite existing config")
+	cmd.Flags().StringVar(&token, "token", "", "API token for the LLM backend")
+	cmd.Flags().StringVar(&url, "url", "", "Explicit backend URL (skips auto-detection)")
 	return cmd
 }
 
@@ -95,13 +118,11 @@ func writeConfig(path, url, token, fastModel, deepModel string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-
 	content := fmt.Sprintf(`[lmstudio]
 url        = %q
 token      = %q
 fast_model = %q
 deep_model = %q
 `, url, token, fastModel, deepModel)
-
 	return os.WriteFile(path, []byte(content), 0o600)
 }
