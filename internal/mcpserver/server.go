@@ -21,16 +21,18 @@ func Serve(ctx context.Context) error {
 
 	s.AddTool(
 		mcp.NewTool("review_diff",
-			mcp.WithDescription("Review staged git changes for code quality, style, and correctness."),
+			mcp.WithDescription("Review staged git changes for code quality, style, and correctness. Automatically detects the current git repo. Optionally pass path to specify a different repo."),
 			mcp.WithBoolean("deep", mcp.Description("Use the deep model (slower, more thorough).")),
+			mcp.WithString("path", mcp.Description("Path to git repo root (optional, auto-detected if omitted).")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			deep := req.GetBool("deep", false)
-			diff, err := gitOutput("diff", "--cached")
+			repoPath, err := resolveRepo(req.GetString("path", ""))
 			if err != nil {
-				return mcp.NewToolResultText("No staged changes to review (not in a git repo or nothing staged)."), nil
+				return mcp.NewToolResultText(err.Error()), nil
 			}
-			if strings.TrimSpace(diff) == "" {
+			diff, err := gitIn(repoPath, "diff", "--cached")
+			if err != nil || strings.TrimSpace(diff) == "" {
 				return mcp.NewToolResultText("No staged changes to review. Stage files with `git add` first."), nil
 			}
 			return runReview(ctx, diff, deep, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
@@ -41,17 +43,19 @@ func Serve(ctx context.Context) error {
 
 	s.AddTool(
 		mcp.NewTool("review_pr",
-			mcp.WithDescription("Review all changes on the current branch vs main."),
+			mcp.WithDescription("Review all changes on the current branch vs main. Automatically detects the current git repo."),
 			mcp.WithBoolean("deep", mcp.Description("Use the deep model (slower, more thorough).")),
+			mcp.WithString("path", mcp.Description("Path to git repo root (optional, auto-detected if omitted).")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			deep := req.GetBool("deep", false)
-			diff, err := prDiff()
+			repoPath, err := resolveRepo(req.GetString("path", ""))
 			if err != nil {
-				return mcp.NewToolResultText(fmt.Sprintf("Cannot diff vs main: %v. Are you in a git repo with a main branch?", err)), nil
+				return mcp.NewToolResultText(err.Error()), nil
 			}
-			if strings.TrimSpace(diff) == "" {
-				return mcp.NewToolResultText("No changes vs main branch."), nil
+			diff, err := prDiffIn(repoPath)
+			if err != nil || strings.TrimSpace(diff) == "" {
+				return mcp.NewToolResultText("No changes vs main branch, or main branch not found."), nil
 			}
 			return runReview(ctx, diff, deep, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
 				return c.ReviewPR(ctx, diff, deep)
@@ -61,14 +65,16 @@ func Serve(ctx context.Context) error {
 
 	s.AddTool(
 		mcp.NewTool("review_repo",
-			mcp.WithDescription("Full repository health review: tech debt, structural issues, improvement opportunities."),
+			mcp.WithDescription("Full repository health review: tech debt, structural issues, improvement opportunities. Automatically detects the current git repo."),
+			mcp.WithString("path", mcp.Description("Path to git repo root (optional, auto-detected if omitted).")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			files, err := repoSnapshot()
+			repoPath, err := resolveRepo(req.GetString("path", ""))
 			if err != nil {
-				return mcp.NewToolResultText(fmt.Sprintf("Cannot snapshot repo: %v. Are you in a git repo?", err)), nil
+				return mcp.NewToolResultText(err.Error()), nil
 			}
-			if strings.TrimSpace(files) == "" {
+			files, err := repoSnapshotIn(repoPath)
+			if err != nil || strings.TrimSpace(files) == "" {
 				return mcp.NewToolResultText("No Go files found in repo."), nil
 			}
 			return runReview(ctx, files, true, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
@@ -80,7 +86,20 @@ func Serve(ctx context.Context) error {
 	return server.ServeStdio(s)
 }
 
-func runReview(ctx context.Context, _ string, _ bool, fn func(*daemon.Client) (*reviewpb.ReviewResponse, error)) (*mcp.CallToolResult, error) {
+// resolveRepo returns the git repo root to use. If explicit is non-empty it's
+// used directly. Otherwise we auto-detect from CWD via git rev-parse.
+func resolveRepo(explicit string) (string, error) {
+	if explicit != "" {
+		return explicit, nil
+	}
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "", fmt.Errorf("not in a git repo and no path provided. Pass path='/path/to/repo' to specify one")
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func runReview(ctx context.Context, content string, _ bool, fn func(*daemon.Client) (*reviewpb.ReviewResponse, error)) (*mcp.CallToolResult, error) {
 	client, err := daemon.Connect(ctx)
 	if err != nil {
 		return mcp.NewToolResultText(fmt.Sprintf("lm-review daemon unavailable (is LM Studio running?): %v", err)), nil
@@ -89,7 +108,7 @@ func runReview(ctx context.Context, _ string, _ bool, fn func(*daemon.Client) (*
 
 	resp, err := fn(client)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return mcp.NewToolResultText(fmt.Sprintf("Review failed: %v", err)), nil
 	}
 
 	return mcp.NewToolResultText(formatResponse(resp)), nil
@@ -109,18 +128,16 @@ func formatResponse(resp *reviewpb.ReviewResponse) string {
 	return sb.String()
 }
 
-func gitOutput(args ...string) (string, error) {
-	out, err := exec.Command("git", args...).Output()
-	if err != nil {
-		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	return string(out), nil
+func gitIn(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.Output()
+	return string(out), err
 }
 
-func prDiff() (string, error) {
-	out, err := exec.Command("git", "diff", "main...HEAD").Output()
+func prDiffIn(dir string) (string, error) {
+	out, err := exec.Command("git", "-C", dir, "diff", "main...HEAD").Output()
 	if err != nil {
-		out, err = exec.Command("git", "diff", "origin/main...HEAD").Output()
+		out, err = exec.Command("git", "-C", dir, "diff", "origin/main...HEAD").Output()
 		if err != nil {
 			return "", fmt.Errorf("git diff vs main: %w", err)
 		}
@@ -128,8 +145,8 @@ func prDiff() (string, error) {
 	return string(out), nil
 }
 
-func repoSnapshot() (string, error) {
-	out, err := exec.Command("git", "ls-files", "*.go").Output()
+func repoSnapshotIn(dir string) (string, error) {
+	out, err := exec.Command("git", "-C", dir, "ls-files", "*.go").Output()
 	if err != nil {
 		return "", fmt.Errorf("git ls-files: %w", err)
 	}
@@ -140,7 +157,7 @@ func repoSnapshot() (string, error) {
 		if f == "" {
 			continue
 		}
-		content, readErr := exec.Command("git", "show", "HEAD:"+f).Output()
+		content, readErr := exec.Command("git", "-C", dir, "show", "HEAD:"+f).Output()
 		if readErr != nil {
 			continue
 		}
