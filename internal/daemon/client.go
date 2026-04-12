@@ -48,18 +48,21 @@ func Connect(ctx context.Context) (*Client, error) {
 func (c *Client) Close() { _ = c.conn.Close() }
 
 // ReviewDiff sends a diff review request to the daemon.
-func (c *Client) ReviewDiff(ctx context.Context, diff string, deep bool) (*reviewpb.ReviewResponse, error) {
-	return c.rpc.ReviewDiff(ctx, &reviewpb.ReviewRequest{Diff: diff, Deep: deep})
+// model overrides config if non-empty.
+func (c *Client) ReviewDiff(ctx context.Context, diff string, deep bool, model string) (*reviewpb.ReviewResponse, error) {
+	return c.rpc.ReviewDiff(ctx, &reviewpb.ReviewRequest{Diff: diff, Deep: deep, Model: model})
 }
 
 // ReviewPR sends a PR diff review request to the daemon.
-func (c *Client) ReviewPR(ctx context.Context, diff string, deep bool) (*reviewpb.ReviewResponse, error) {
-	return c.rpc.ReviewPR(ctx, &reviewpb.ReviewRequest{Diff: diff, Deep: deep})
+// model overrides config if non-empty.
+func (c *Client) ReviewPR(ctx context.Context, diff string, deep bool, model string) (*reviewpb.ReviewResponse, error) {
+	return c.rpc.ReviewPR(ctx, &reviewpb.ReviewRequest{Diff: diff, Deep: deep, Model: model})
 }
 
 // ReviewRepo sends a full repo review request to the daemon.
-func (c *Client) ReviewRepo(ctx context.Context, files string, deep bool) (*reviewpb.ReviewResponse, error) {
-	return c.rpc.ReviewRepo(ctx, &reviewpb.ReviewRequest{Diff: files, Deep: deep})
+// model overrides config if non-empty.
+func (c *Client) ReviewRepo(ctx context.Context, files string, deep bool, model string) (*reviewpb.ReviewResponse, error) {
+	return c.rpc.ReviewRepo(ctx, &reviewpb.ReviewRequest{Diff: files, Deep: deep, Model: model})
 }
 
 func startDaemon() error {

@@ -5,8 +5,21 @@
 [lmstudio]
 url        = "http://localhost:1234"  # LM Studio, ollama (:11434), or OpenAI
 token      = ""                        # API token
-fast_model = ""                        # Small/fast model for diff/pr reviews
-deep_model = ""                        # Large model for repo-wide reviews
+fast_model = ""                        # Global fallback fast model
+deep_model = ""                        # Global fallback deep model
+
+# Per-mode model overrides. Falls back to fast_model/deep_model if not set.
+[lmstudio.diff]
+model      = ""   # model for `lm-review diff`
+deep_model = ""   # model for `lm-review diff --deep`
+
+[lmstudio.pr]
+model      = ""   # model for `lm-review pr`
+deep_model = ""   # model for `lm-review pr --deep`
+
+[lmstudio.repo]
+model      = ""   # model for `lm-review repo` (typically a stronger model)
+deep_model = ""   # model for `lm-review repo --deep` (largest available)
 
 # Rules are sent to the LLM as part of every review prompt.
 # Rules with no globs apply to every review.

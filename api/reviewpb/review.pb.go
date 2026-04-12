@@ -26,6 +26,7 @@ type ReviewRequest struct {
 	Diff          string                 `protobuf:"bytes,1,opt,name=diff,proto3" json:"diff,omitempty"`
 	Deep          bool                   `protobuf:"varint,2,opt,name=deep,proto3" json:"deep,omitempty"`
 	Context       string                 `protobuf:"bytes,3,opt,name=context,proto3" json:"context,omitempty"` // optional extra context (e.g. PR title)
+	Model         string                 `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`     // override model for this request (empty = use config)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -77,6 +78,13 @@ func (x *ReviewRequest) GetDeep() bool {
 func (x *ReviewRequest) GetContext() string {
 	if x != nil {
 		return x.Context
+	}
+	return ""
+}
+
+func (x *ReviewRequest) GetModel() string {
+	if x != nil {
+		return x.Model
 	}
 	return ""
 }
@@ -269,11 +277,12 @@ var File_review_proto protoreflect.FileDescriptor
 
 const file_review_proto_rawDesc = "" +
 	"\n" +
-	"\freview.proto\x12\blmreview\"Q\n" +
+	"\freview.proto\x12\blmreview\"g\n" +
 	"\rReviewRequest\x12\x12\n" +
 	"\x04diff\x18\x01 \x01(\tR\x04diff\x12\x12\n" +
 	"\x04deep\x18\x02 \x01(\bR\x04deep\x12\x18\n" +
-	"\acontext\x18\x03 \x01(\tR\acontext\"\xa2\x01\n" +
+	"\acontext\x18\x03 \x01(\tR\acontext\x12\x14\n" +
+	"\x05model\x18\x04 \x01(\tR\x05model\"\xa2\x01\n" +
 	"\x0eReviewResponse\x12\x18\n" +
 	"\averdict\x18\x01 \x01(\tR\averdict\x12\x18\n" +
 	"\asummary\x18\x02 \x01(\tR\asummary\x12\x14\n" +

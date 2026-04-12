@@ -81,9 +81,10 @@ func (s *Server) ReviewRepo(ctx context.Context, req *reviewpb.ReviewRequest) (*
 func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.ReviewRequest) (*reviewpb.ReviewResponse, error) {
 	start := time.Now()
 
-	model := s.cfg.LMStudio.FastModel
-	if req.Deep {
-		model = s.cfg.LMStudio.DeepModel
+	// Request model overrides config; config resolves per-scope then global.
+	model := req.Model
+	if model == "" {
+		model = s.cfg.LMStudio.ResolveModel(scope, req.Deep)
 	}
 
 	client := lmstudio.New(s.cfg.LMStudio.URL, s.cfg.LMStudio.Token, model)

@@ -21,14 +21,20 @@ const repoMaxBytes = 80_000
 func Serve(ctx context.Context) error {
 	s := server.NewMCPServer("lm-review", "1.0.0")
 
+	modelFlag := mcp.WithString("model",
+		mcp.Description("Override the model for this request (e.g. 'qwen/qwen3-coder-next'). Uses config default if omitted."),
+	)
+
 	s.AddTool(
 		mcp.NewTool("review_diff",
-			mcp.WithDescription("Review staged git changes for code quality, style, and correctness. Automatically detects the current git repo. Optionally pass path to specify a different repo."),
-			mcp.WithBoolean("deep", mcp.Description("Use the deep model (slower, more thorough).")),
+			mcp.WithDescription("Review staged git changes for code quality, style, and correctness."),
+			mcp.WithBoolean("deep", mcp.Description("Use the deep model from config (or pass model= to specify any model).")),
 			mcp.WithString("path", mcp.Description("Path to git repo root (optional, auto-detected if omitted).")),
+			modelFlag,
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			deep := req.GetBool("deep", false)
+			model := req.GetString("model", "")
 			repoRoot, err := gitutil.Root(req.GetString("path", ""))
 			if err != nil {
 				return mcp.NewToolResultText(err.Error()), nil
@@ -38,19 +44,21 @@ func Serve(ctx context.Context) error {
 				return mcp.NewToolResultText("No staged changes to review. Stage files with `git add` first."), nil
 			}
 			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-				return c.ReviewDiff(ctx, diff, deep)
+				return c.ReviewDiff(ctx, diff, deep, model)
 			})
 		},
 	)
 
 	s.AddTool(
 		mcp.NewTool("review_pr",
-			mcp.WithDescription("Review all changes on the current branch vs main. Automatically detects the current git repo."),
-			mcp.WithBoolean("deep", mcp.Description("Use the deep model (slower, more thorough).")),
+			mcp.WithDescription("Review all changes on the current branch vs main."),
+			mcp.WithBoolean("deep", mcp.Description("Use the deep model from config (or pass model= to specify any model).")),
 			mcp.WithString("path", mcp.Description("Path to git repo root (optional, auto-detected if omitted).")),
+			modelFlag,
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			deep := req.GetBool("deep", false)
+			model := req.GetString("model", "")
 			repoRoot, err := gitutil.Root(req.GetString("path", ""))
 			if err != nil {
 				return mcp.NewToolResultText(err.Error()), nil
@@ -60,17 +68,21 @@ func Serve(ctx context.Context) error {
 				return mcp.NewToolResultText("No changes vs main branch, or main branch not found."), nil
 			}
 			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-				return c.ReviewPR(ctx, diff, deep)
+				return c.ReviewPR(ctx, diff, deep, model)
 			})
 		},
 	)
 
 	s.AddTool(
 		mcp.NewTool("review_repo",
-			mcp.WithDescription("Full repository health review: tech debt, structural issues, improvement opportunities. Automatically detects the current git repo."),
+			mcp.WithDescription("Full repository health review: tech debt, structural issues, improvement opportunities."),
+			mcp.WithBoolean("deep", mcp.Description("Use the deep model from config (or pass model= to specify any model). Defaults to false - uses repo model from config.")),
 			mcp.WithString("path", mcp.Description("Path to git repo root (optional, auto-detected if omitted).")),
+			modelFlag,
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			deep := req.GetBool("deep", false)
+			model := req.GetString("model", "")
 			repoRoot, err := gitutil.Root(req.GetString("path", ""))
 			if err != nil {
 				return mcp.NewToolResultText(err.Error()), nil
@@ -80,7 +92,7 @@ func Serve(ctx context.Context) error {
 				return mcp.NewToolResultText("No Go files found in repo."), nil
 			}
 			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-				return c.ReviewRepo(ctx, files, true)
+				return c.ReviewRepo(ctx, files, deep, model)
 			})
 		},
 	)

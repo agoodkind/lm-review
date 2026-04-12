@@ -38,6 +38,7 @@ func main() {
 
 func newDiffCmd() *cobra.Command {
 	var deep bool
+	var model string
 	cmd := &cobra.Command{
 		Use:   "diff",
 		Short: "Review staged changes (runs on make build)",
@@ -51,15 +52,17 @@ func newDiffCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runReview(cmd.Context(), "diff", diff, deep)
+			return runReview(cmd.Context(), "diff", diff, deep, model)
 		},
 	}
-	cmd.Flags().BoolVar(&deep, "deep", false, "Use deep model")
+	cmd.Flags().BoolVar(&deep, "deep", false, "Use deep model from config")
+	cmd.Flags().StringVar(&model, "model", "", "Override model for this request")
 	return cmd
 }
 
 func newPRCmd() *cobra.Command {
 	var deep bool
+	var model string
 	cmd := &cobra.Command{
 		Use:   "pr",
 		Short: "Review diff against main branch",
@@ -72,15 +75,18 @@ func newPRCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runReview(cmd.Context(), "pr", diff, deep)
+			return runReview(cmd.Context(), "pr", diff, deep, model)
 		},
 	}
-	cmd.Flags().BoolVar(&deep, "deep", false, "Use deep model")
+	cmd.Flags().BoolVar(&deep, "deep", false, "Use deep model from config")
+	cmd.Flags().StringVar(&model, "model", "", "Override model for this request")
 	return cmd
 }
 
 func newRepoCmd() *cobra.Command {
 	var async bool
+	var deep bool
+	var model string
 	cmd := &cobra.Command{
 		Use:   "repo",
 		Short: "Full repo health review",
@@ -104,7 +110,7 @@ func newRepoCmd() *cobra.Command {
 			}
 			defer client.Close()
 
-			resp, err := client.ReviewRepo(cmd.Context(), files, true)
+			resp, err := client.ReviewRepo(cmd.Context(), files, deep, model)
 			if err != nil {
 				return err
 			}
@@ -117,6 +123,8 @@ func newRepoCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&async, "async", false, "Run in background, post result when done")
+	cmd.Flags().BoolVar(&deep, "deep", false, "Use deep model from config")
+	cmd.Flags().StringVar(&model, "model", "", "Override model for this request")
 	return cmd
 }
 
@@ -142,7 +150,7 @@ func newMCPCmd() *cobra.Command {
 }
 
 
-func runReview(ctx context.Context, scope, diff string, deep bool) error {
+func runReview(ctx context.Context, scope, diff string, deep bool, model string) error {
 	client, err := daemon.Connect(ctx)
 	if err != nil {
 		log.Info("skipping review: daemon unavailable", "err", err)
@@ -153,9 +161,9 @@ func runReview(ctx context.Context, scope, diff string, deep bool) error {
 	var resp *reviewpb.ReviewResponse
 	switch scope {
 	case "diff":
-		resp, err = client.ReviewDiff(ctx, diff, deep)
+		resp, err = client.ReviewDiff(ctx, diff, deep, model)
 	case "pr":
-		resp, err = client.ReviewPR(ctx, diff, deep)
+		resp, err = client.ReviewPR(ctx, diff, deep, model)
 	}
 	if err != nil {
 		return fmt.Errorf("review: %w", err)

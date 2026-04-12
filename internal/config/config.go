@@ -16,6 +16,13 @@ type Config struct {
 	Rules    []Rule   `toml:"rules"`
 }
 
+// ModeModels holds per-mode model overrides.
+// Falls back to the global fast_model/deep_model if not set.
+type ModeModels struct {
+	Model     string `toml:"model,omitempty"`
+	DeepModel string `toml:"deep_model,omitempty"`
+}
+
 // LMStudio holds connection and model settings.
 // Works with any OpenAI-compatible endpoint: LM Studio, ollama, OpenAI, etc.
 type LMStudio struct {
@@ -23,6 +30,37 @@ type LMStudio struct {
 	Token     string `toml:"token"`
 	FastModel string `toml:"fast_model"`
 	DeepModel string `toml:"deep_model"`
+
+	// Per-mode overrides. Falls back to FastModel/DeepModel if not set.
+	Diff ModeModels `toml:"diff,omitempty"`
+	PR   ModeModels `toml:"pr,omitempty"`
+	Repo ModeModels `toml:"repo,omitempty"`
+}
+
+// ResolveModel returns the model to use for a given scope and deep flag.
+// Resolution: per-mode config → global fast/deep → empty string.
+func (l LMStudio) ResolveModel(scope string, deep bool) string {
+	var mode ModeModels
+	switch scope {
+	case "diff":
+		mode = l.Diff
+	case "pr":
+		mode = l.PR
+	case "repo":
+		mode = l.Repo
+	}
+
+	if deep {
+		if mode.DeepModel != "" {
+			return mode.DeepModel
+		}
+		return l.DeepModel
+	}
+
+	if mode.Model != "" {
+		return mode.Model
+	}
+	return l.FastModel
 }
 
 // Rule is a single review instruction sent to the LLM.
