@@ -15,6 +15,7 @@ message ReviewRequest {
   bool   deep    = 2;
   string context = 3; // optional extra context (e.g. PR title)
   string model   = 4; // override model for this request (empty = use config)
+  string path    = 5; // absolute path to repo root for project-local rule loading
 }
 
 message ReviewResponse {

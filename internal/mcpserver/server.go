@@ -44,7 +44,7 @@ func Serve(ctx context.Context) error {
 				return mcp.NewToolResultText("No staged changes to review. Stage files with `git add` first."), nil
 			}
 			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-				return c.ReviewDiff(ctx, diff, deep, model)
+				return c.ReviewDiff(ctx, diff, repoRoot, deep, model)
 			})
 		},
 	)
@@ -68,7 +68,7 @@ func Serve(ctx context.Context) error {
 				return mcp.NewToolResultText("No changes vs main branch, or main branch not found."), nil
 			}
 			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-				return c.ReviewPR(ctx, diff, deep, model)
+				return c.ReviewPR(ctx, diff, repoRoot, deep, model)
 			})
 		},
 	)
@@ -92,7 +92,7 @@ func Serve(ctx context.Context) error {
 				return mcp.NewToolResultText("No Go files found in repo."), nil
 			}
 			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-				return c.ReviewRepo(ctx, files, deep, model)
+				return c.ReviewRepo(ctx, files, repoRoot, deep, model)
 			})
 		},
 	)

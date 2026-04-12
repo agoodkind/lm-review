@@ -78,9 +78,6 @@ type Result struct {
 // reThinkBlock matches Qwen3/DeepSeek chain-of-thought blocks.
 var reThinkBlock = regexp.MustCompile(`(?s)<think>.*?</think>`)
 
-// reJSONBlock matches the outermost JSON object in arbitrary text.
-var reJSONBlock = regexp.MustCompile(`(?s)\{.*\}`)
-
 // Parse extracts a Result from raw LLM output. It handles:
 //   - Qwen3/DeepSeek <think>...</think> reasoning blocks
 //   - Markdown code fences (```json ... ```)
@@ -111,8 +108,11 @@ func Parse(raw string) (*Result, error) {
 	// Try direct unmarshal first.
 	var result Result
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		// Fall back: extract JSON object from surrounding prose.
-		match := reJSONBlock.FindString(raw)
+		// Fall back: extract the first balanced JSON object from surrounding prose.
+		// Using a greedy regex here would grab from the first { in reasoning text
+		// to the last } in the document, producing invalid JSON. Instead we scan
+		// forward from each { to find the one that yields a balanced object.
+		match := extractFirstJSONObject(raw)
 		if match == "" {
 			return nil, fmt.Errorf("no JSON found in LLM response: %s", truncate(raw, 200))
 		}
@@ -447,6 +447,48 @@ func (r *Result) IssuesByCategory() map[Category][]Issue {
 		})
 	}
 	return out
+}
+
+// extractFirstJSONObject scans s for the first '{' that opens a balanced JSON
+// object and returns that substring. Returns "" if none is found.
+// This avoids the greedy-regex problem where reasoning prose containing bare
+// '{' and '}' characters causes the extractor to return malformed input.
+func extractFirstJSONObject(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '{' {
+			continue
+		}
+		depth := 0
+		inString := false
+		escape := false
+		for j := i; j < len(s); j++ {
+			ch := s[j]
+			if escape {
+				escape = false
+				continue
+			}
+			if ch == '\\' && inString {
+				escape = true
+				continue
+			}
+			if ch == '"' {
+				inString = !inString
+				continue
+			}
+			if inString {
+				continue
+			}
+			if ch == '{' {
+				depth++
+			} else if ch == '}' {
+				depth--
+				if depth == 0 {
+					return s[i : j+1]
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func truncate(s string, n int) string {

@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/BurntSushi/toml"
 
@@ -92,4 +93,29 @@ func Load() (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// projectConfig holds only the fields allowed in a project-local .lm-review.toml.
+type projectConfig struct {
+	Rules []Rule `toml:"rules"`
+}
+
+// MergeProjectRules loads <repoPath>/.lm-review.toml if it exists and appends
+// its rules to cfg. The project-local file may only contain [[rules]] entries;
+// model and connection settings are ignored. Returns cfg unchanged if the file
+// is absent.
+func MergeProjectRules(cfg *Config, repoPath string) (*Config, error) {
+	localPath := filepath.Join(repoPath, ".lm-review.toml")
+	if _, err := os.Stat(localPath); os.IsNotExist(err) {
+		return cfg, nil
+	}
+
+	var local projectConfig
+	if _, err := toml.DecodeFile(localPath, &local); err != nil {
+		return cfg, fmt.Errorf("decode project config %s: %w", localPath, err)
+	}
+
+	merged := *cfg
+	merged.Rules = append(append([]Rule{}, cfg.Rules...), local.Rules...)
+	return &merged, nil
 }

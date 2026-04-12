@@ -1,0 +1,11 @@
+# Project-local review rules for lm-review itself.
+# These are merged on top of the global ~/.config/lm-review/config.toml rules.
+# Only [[rules]] entries are read here; model and connection settings are ignored.
+
+[[rules]]
+text  = "Logging level and output path must be configurable via both TOML config and environment variable override. Flag any log level or path that is hardcoded."
+globs = ["*.go"]
+
+[[rules]]
+text  = "All log output must go to a file via a unified slog JSON handler. Never log to stderr or stdout. Flag any slog.New(slog.NewTextHandler(os.Stderr, ...)) or fmt.Fprintf(os.Stderr) used for diagnostics."
+globs = ["*.go"]

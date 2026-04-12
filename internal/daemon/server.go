@@ -89,10 +89,20 @@ func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.Revi
 
 	client := lmstudio.New(s.cfg.LMStudio.URL, s.cfg.LMStudio.Token, model)
 
+	// Merge project-local rules from <path>/.lm-review.toml if present.
+	cfg := s.cfg
+	if req.Path != "" {
+		var mergeErr error
+		cfg, mergeErr = config.MergeProjectRules(s.cfg, req.Path)
+		if mergeErr != nil {
+			s.log.Write(audit.Entry{Scope: scope, Error: mergeErr.Error()})
+		}
+	}
+
 	// Extract texts and globs from config rules, then filter to files in this diff.
-	texts := make([]string, len(s.cfg.Rules))
-	filters := make([]review.RuleFilter, len(s.cfg.Rules))
-	for i, r := range s.cfg.Rules {
+	texts := make([]string, len(cfg.Rules))
+	filters := make([]review.RuleFilter, len(cfg.Rules))
+	for i, r := range cfg.Rules {
 		texts[i] = r.Text
 		filters[i] = review.RuleFilter{Globs: r.Globs, Always: r.Always}
 	}
