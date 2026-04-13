@@ -84,64 +84,28 @@ Project-local rules can be added via ` + "`.lm-review.toml`" + ` in the repo roo
 
 	s.AddPrompt(
 		mcp.Prompt{
-			Name:        "run_review",
-			Description: "Run an lm-review code review. Picks scope (diff, pr, repo) and depth (fast or deep).",
-			Arguments: []mcp.PromptArgument{
-				{
-					Name:        "scope",
-					Description: "What to review: 'diff' (staged changes), 'pr' (branch vs main), or 'repo' (full repository).",
-					Required:    true,
-				},
-				{
-					Name:        "deep",
-					Description: "Use the deep model for more thorough analysis. 'true' or 'false' (default: false).",
-					Required:    false,
-				},
-			},
+			Name:        "getting_started",
+			Description: "Get started with lm-review. Explains available tools, how to pick scope and depth, and runs an initial review.",
 		},
 		func(ctx context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-			scope := req.Params.Arguments["scope"]
-			deep := req.Params.Arguments["deep"] == "true"
-
-			var description string
-			switch scope {
-			case "diff":
-				if deep {
-					description = "Deep review of staged changes"
-				} else {
-					description = "Quick review of staged changes"
-				}
-			case "pr":
-				if deep {
-					description = "Deep review of PR (branch vs main)"
-				} else {
-					description = "Quick review of PR (branch vs main)"
-				}
-			case "repo":
-				if deep {
-					description = "Deep full repository health review"
-				} else {
-					description = "Full repository health review"
-				}
-			default:
-				scope = "diff"
-				description = "Quick review of staged changes"
-			}
-
-			deepStr := "false"
-			if deep {
-				deepStr = "true"
-			}
-
 			return &mcp.GetPromptResult{
-				Description: description,
+				Description: "lm-review onboarding",
 				Messages: []mcp.PromptMessage{
 					{
 						Role: mcp.RoleUser,
-						Content: mcp.NewTextContent(fmt.Sprintf(
-							"Run an lm-review %s review with deep=%s. Use the review_%s tool.",
-							scope, deepStr, scope,
-						)),
+						Content: mcp.NewTextContent(`You have access to lm-review, a local LLM code review tool powered by LM Studio.
+
+Available tools:
+- review_diff: Reviews staged git changes. Run "git add" first, then call this tool. Best for pre-commit checks.
+- review_pr: Reviews all changes on the current branch vs main. Best for PR readiness.
+- review_repo: Full repository health review. Scans all source files for tech debt, security issues, and structural problems.
+
+Each tool accepts:
+- deep (bool): Use the deep model for more thorough analysis. Slower but catches more.
+- model (string): Override the model for this request.
+- path (string): Path to git repo root. Auto-detected if omitted.
+
+Start by checking if there are staged changes with "git diff --cached --stat". If there are, run review_diff. If not, check if the current branch has commits ahead of main. If so, run review_pr. Otherwise, offer to run review_repo for a full health check.`),
 					},
 				},
 			}, nil
