@@ -14,9 +14,20 @@ import (
 	"goodkind.io/lm-review/internal/gitutil"
 	"goodkind.io/lm-review/internal/github"
 	"goodkind.io/lm-review/internal/mcpserver"
+	"goodkind.io/lm-review/internal/version"
 )
 
 var log = slog.Default()
+
+func init() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil).WithAttrs([]slog.Attr{
+		slog.String("commit", version.Commit),
+		slog.String("version", version.Version),
+		slog.String("buildHash", version.BuildHash()),
+		slog.String("dirty", version.Dirty),
+	})))
+	log = slog.Default()
+}
 
 func main() {
 	root := &cobra.Command{

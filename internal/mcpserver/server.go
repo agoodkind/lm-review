@@ -13,16 +13,14 @@ import (
 	"goodkind.io/lm-review/api/reviewpb"
 	"goodkind.io/lm-review/internal/daemon"
 	"goodkind.io/lm-review/internal/gitutil"
+	"goodkind.io/lm-review/internal/version"
 )
 
 // No client-side truncation; the daemon handles chunking based on context_length.
 
 // Serve starts the MCP stdio server and blocks until the client disconnects.
 func Serve(ctx context.Context) error {
-	s := server.NewMCPServer("lm-review", "1.0.0",
-		server.WithResourceCapabilities(true, false),
-		server.WithPromptCapabilities(true),
-	)
+	s := server.NewMCPServer("lm-review", version.Version)
 
 	// --- Resources ---
 
