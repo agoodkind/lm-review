@@ -36,7 +36,9 @@ JSON schema:
 Verdict rules:
 - "block": any error-severity issue, security vulnerability, or fundamentally broken logic
 - "warn": warnings present but no blockers
-- "pass": clean or only informational notes`
+- "pass": clean or only informational notes
+
+Report each distinct finding once. If the same problem spans multiple files, pick the most actionable location and note the scope in the message.`
 
 // reDiffFile matches file paths from unified diff headers: "+++ b/path/to/file"
 var reDiffFile = regexp.MustCompile(`(?m)^\+\+\+ b/(.+)$`)
