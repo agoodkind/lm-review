@@ -10,18 +10,10 @@ import (
 	"goodkind.io/lm-review/internal/lmstudio"
 )
 
-const (
-	// chunkBytes is the max bytes per chunk sent to the LLM.
-	// ~80KB fits comfortably in a 32K context window with the system prompt.
-	chunkBytes = 80_000
-
-	// largeRepoBytes triggers chunked mode instead of single-shot.
-	largeRepoBytes = chunkBytes
-)
-
 // ChunkedRepoReview reviews a large codebase by splitting it into chunks,
 // reviewing each independently, then merging the results into one Result.
-func ChunkedRepoReview(ctx context.Context, client *lmstudio.Client, files string, scope string, rules []string) (*Result, error) {
+// chunkBytes controls the max bytes per chunk sent to the LLM.
+func ChunkedRepoReview(ctx context.Context, client *lmstudio.Client, files string, scope string, rules []string, chunkBytes int) (*Result, error) {
 	chunks := splitIntoChunks(files, chunkBytes)
 
 	if len(chunks) == 1 {
@@ -41,9 +33,11 @@ func ChunkedRepoReview(ctx context.Context, client *lmstudio.Client, files strin
 			openai.SystemMessage(BuildSystemPrompt(rules)),
 			openai.UserMessage(ChunkPrompt(chunk, i+1, len(chunks))),
 		})
-		if err != nil {
+		if err != nil && raw == "" {
 			return nil, fmt.Errorf("chunk %d/%d review: %w", i+1, len(chunks), err)
 		}
+		// If Chat returned a repetition-loop error with partial content,
+		// attempt to salvage by parsing what we got.
 
 		result, err := Parse(raw)
 		if err != nil {

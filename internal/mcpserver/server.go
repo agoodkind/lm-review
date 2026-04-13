@@ -15,7 +15,7 @@ import (
 	"goodkind.io/lm-review/internal/gitutil"
 )
 
-const repoMaxBytes = 80_000
+// No client-side truncation; the daemon handles chunking based on context_length.
 
 // Serve starts the MCP stdio server and blocks until the client disconnects.
 func Serve(ctx context.Context) error {
@@ -87,7 +87,7 @@ func Serve(ctx context.Context) error {
 			if err != nil {
 				return mcp.NewToolResultText(err.Error()), nil
 			}
-			files, err := gitutil.RepoSnapshot(repoRoot, repoMaxBytes)
+			files, err := gitutil.RepoSnapshot(repoRoot, 0)
 			if err != nil || strings.TrimSpace(files) == "" {
 				return mcp.NewToolResultText("No Go files found in repo."), nil
 			}

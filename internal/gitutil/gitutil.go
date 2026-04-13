@@ -43,7 +43,7 @@ func PRDiff(repoRoot string) (string, error) {
 }
 
 // RepoSnapshot returns a concatenated string of all Go files in the repo,
-// truncated at maxBytes to fit in LLM context.
+// truncated at maxBytes to fit in LLM context. Pass 0 for no limit.
 func RepoSnapshot(repoRoot string, maxBytes int) (string, error) {
 	out, err := exec.Command("git", "-C", repoRoot, "ls-files", "*.go").Output()
 	if err != nil {
@@ -62,7 +62,7 @@ func RepoSnapshot(repoRoot string, maxBytes int) (string, error) {
 			continue
 		}
 		entry := fmt.Sprintf("// FILE: %s\n%s\n\n", f, content)
-		if sb.Len()+len(entry) > maxBytes {
+		if maxBytes > 0 && sb.Len()+len(entry) > maxBytes {
 			fmt.Fprintf(&sb, "// ... truncated at %d bytes\n", maxBytes)
 			break
 		}

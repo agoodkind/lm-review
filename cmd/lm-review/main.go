@@ -98,7 +98,7 @@ func newRepoCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			files, err := gitutil.RepoSnapshot(repoRoot, 80_000)
+			files, err := gitutil.RepoSnapshot(repoRoot, 0)
 			if err != nil {
 				return err
 			}

@@ -27,15 +27,43 @@ type ModeModels struct {
 // LMStudio holds connection and model settings.
 // Works with any OpenAI-compatible endpoint: LM Studio, ollama, OpenAI, etc.
 type LMStudio struct {
-	URL       string `toml:"url"`
-	Token     string `toml:"token"`
-	FastModel string `toml:"fast_model"`
-	DeepModel string `toml:"deep_model"`
+	URL           string `toml:"url"`
+	Token         string `toml:"token"`
+	FastModel     string `toml:"fast_model"`
+	DeepModel     string `toml:"deep_model"`
+	ContextLength     int `toml:"context_length,omitempty"`      // tokens; passed to lms load -c (default 32768)
+	MaxResponseTokens int `toml:"max_response_tokens,omitempty"` // max response tokens per request (default 8192)
 
 	// Per-mode overrides. Falls back to FastModel/DeepModel if not set.
 	Diff ModeModels `toml:"diff,omitempty"`
 	PR   ModeModels `toml:"pr,omitempty"`
 	Repo ModeModels `toml:"repo,omitempty"`
+}
+
+// ResolveContextLength returns the configured context length or the default.
+func (l LMStudio) ResolveContextLength() int {
+	if l.ContextLength > 0 {
+		return l.ContextLength
+	}
+	return 32768
+}
+
+// ResolveMaxResponseTokens returns the configured max response tokens or the default.
+func (l LMStudio) ResolveMaxResponseTokens() int {
+	if l.MaxResponseTokens > 0 {
+		return l.MaxResponseTokens
+	}
+	return 8192
+}
+
+// ResolveRepoMaxBytes returns the max bytes of source to send for a repo review.
+// Derived from context_length: ~75% of context budget (in chars, ~4 chars/token)
+// minus room for system prompt and response.
+func (l LMStudio) ResolveRepoMaxBytes() int {
+	ctx := l.ResolveContextLength()
+	// Reserve 25% for system prompt + response tokens.
+	// ~4 chars per token for code.
+	return ctx * 3
 }
 
 // ResolveModel returns the model to use for a given scope and deep flag.

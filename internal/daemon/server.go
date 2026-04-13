@@ -87,7 +87,12 @@ func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.Revi
 		model = s.cfg.LMStudio.ResolveModel(scope, req.Deep)
 	}
 
-	client := lmstudio.New(s.cfg.LMStudio.URL, s.cfg.LMStudio.Token, model)
+	// Ensure model is loaded with the configured context length.
+	if err := lmstudio.EnsureLoaded(ctx, model, s.cfg.LMStudio.ResolveContextLength()); err != nil {
+		s.log.Write(audit.Entry{Scope: scope, Error: fmt.Sprintf("model load: %v", err)})
+	}
+
+	client := lmstudio.New(s.cfg.LMStudio.URL, s.cfg.LMStudio.Token, model, s.cfg.LMStudio.ResolveMaxResponseTokens())
 
 	// Merge project-local rules from <path>/.lm-review.toml if present.
 	cfg := s.cfg
@@ -113,8 +118,9 @@ func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.Revi
 		result *review.Result
 		err    error
 	)
-	if scope == "repo" && len(req.Diff) > 80_000 {
-		result, err = review.ChunkedRepoReview(ctx, client, req.Diff, scope, rules)
+	repoMaxBytes := s.cfg.LMStudio.ResolveRepoMaxBytes()
+	if scope == "repo" && len(req.Diff) > repoMaxBytes {
+		result, err = review.ChunkedRepoReview(ctx, client, req.Diff, scope, rules, repoMaxBytes)
 	} else {
 		r := review.New(client, scope, rules)
 		result, err = r.ReviewDiff(ctx, req.Diff)
