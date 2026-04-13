@@ -1,6 +1,5 @@
 /lm-review
 .make/
-notarize.env
 dist/
 *.test
 *.out
