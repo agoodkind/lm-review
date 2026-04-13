@@ -29,7 +29,7 @@ func New(client *lmstudio.Client, scope string, rules []string) *Reviewer {
 // ReviewDiff reviews a unified diff string.
 func (r *Reviewer) ReviewDiff(ctx context.Context, diff string) (*Result, error) {
 	if diff == "" {
-		return &Result{Verdict: VerdictPass, Summary: "No changes to review.", Scope: r.scope, Model: r.client.ModelID()}, nil
+		return &Result{Verdict: VerdictSkip, Summary: "No changes to review.", Scope: r.scope, Model: r.client.ModelID()}, nil
 	}
 
 	raw, err := r.client.Chat(ctx, []openai.ChatCompletionMessageParamUnion{

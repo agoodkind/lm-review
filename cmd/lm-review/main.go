@@ -182,7 +182,7 @@ func runReview(ctx context.Context, scope, diff, repoPath string, deep bool, mod
 }
 
 func printResult(resp *reviewpb.ReviewResponse) {
-	icon := map[string]string{"pass": "✅", "warn": "⚠️", "block": "🚫"}[resp.Verdict]
+	icon := map[string]string{"pass": "✅", "warn": "⚠️", "block": "🚫", "skip": "⏭️"}[resp.Verdict]
 	fmt.Fprintf(os.Stderr, "\nlm-review [%s] %s %s: %s\n",
 		resp.Model, icon, strings.ToUpper(resp.Verdict), resp.Summary)
 	for _, issue := range resp.Issues {

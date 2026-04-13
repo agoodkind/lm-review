@@ -15,6 +15,7 @@ const (
 	VerdictPass  Verdict = "pass"
 	VerdictWarn  Verdict = "warn"
 	VerdictBlock Verdict = "block"
+	VerdictSkip  Verdict = "skip" // nothing to review
 )
 
 // Category groups issues by concern type.
