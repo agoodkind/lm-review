@@ -110,11 +110,22 @@ func EnsureLoaded(ctx context.Context, model string, contextLen int) error {
 	return nil
 }
 
+// baseModelName strips the publisher prefix (e.g. "qwen/qwen3-coder-next"
+// becomes "qwen3-coder-next") so we match regardless of namespace.
+func baseModelName(model string) string {
+	if i := strings.LastIndex(model, "/"); i >= 0 {
+		return model[i+1:]
+	}
+	return model
+}
+
 // isLoadedWithContext checks lms ps output to see if the model is loaded
-// and its context length is at least the required size.
+// and its context length is at least the required size. Matches on the base
+// model name to handle namespaced vs bare identifiers.
 func isLoadedWithContext(psOutput, model string, requiredCtx int) bool {
+	base := baseModelName(model)
 	for _, line := range strings.Split(psOutput, "\n") {
-		if !strings.Contains(line, model) {
+		if !strings.Contains(line, base) {
 			continue
 		}
 		// Parse context column from the tabular lms ps output.
