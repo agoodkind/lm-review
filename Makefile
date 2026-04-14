@@ -42,7 +42,6 @@ LDFLAGS := -X $(VPKG).Commit=$(GIT_COMMIT) \
 
 build:
 	go build -ldflags "$(LDFLAGS)" $(CMD)
-	@command -v lm-review >/dev/null 2>&1 && lm-review diff || true
 
 deploy:
 	go install -ldflags "$(LDFLAGS)" $(CMD)

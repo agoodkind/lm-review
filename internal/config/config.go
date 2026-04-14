@@ -13,8 +13,23 @@ import (
 
 // Config is the top-level configuration.
 type Config struct {
+	Provider string   `toml:"provider,omitempty"` // "lmstudio" (default) or "claude"
 	LMStudio LMStudio `toml:"lmstudio"`
+	Claude   Claude   `toml:"claude"`
 	Rules    []Rule   `toml:"rules"`
+}
+
+// Claude holds settings for the claude CLI provider.
+type Claude struct {
+	Model string `toml:"model,omitempty"` // e.g. "opus", "sonnet", "haiku"
+}
+
+// ResolveProvider returns the configured provider or the default.
+func (c Config) ResolveProvider() string {
+	if c.Provider != "" {
+		return c.Provider
+	}
+	return "lmstudio"
 }
 
 // ModeModels holds per-mode model overrides.
@@ -33,6 +48,7 @@ type LMStudio struct {
 	DeepModel     string `toml:"deep_model"`
 	ContextLength     int `toml:"context_length,omitempty"`      // tokens; passed to lms load -c (default 32768)
 	MaxResponseTokens int `toml:"max_response_tokens,omitempty"` // max response tokens per request (default 8192)
+	ChunkParallelism  int `toml:"chunk_parallelism,omitempty"`   // parallel chunk reviews for large repos (default 1)
 
 	// Per-mode overrides. Falls back to FastModel/DeepModel if not set.
 	Diff ModeModels `toml:"diff,omitempty"`
@@ -54,6 +70,14 @@ func (l LMStudio) ResolveMaxResponseTokens() int {
 		return l.MaxResponseTokens
 	}
 	return 8192
+}
+
+// ResolveChunkParallelism returns the configured chunk parallelism or the default.
+func (l LMStudio) ResolveChunkParallelism() int {
+	if l.ChunkParallelism > 0 {
+		return l.ChunkParallelism
+	}
+	return 1
 }
 
 // ResolveRepoMaxBytes returns the max bytes of source to send for a repo review.

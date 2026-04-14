@@ -40,11 +40,14 @@ func New(baseURL, token, model string, maxTokens int) *Client {
 	return &Client{inner: c, model: model, maxTokens: int64(maxTokens)}
 }
 
-// Chat sends messages and returns the assistant reply.
-func (c *Client) Chat(ctx context.Context, messages []openai.ChatCompletionMessageParamUnion) (string, error) {
+// Chat sends a system prompt and user message, returning the assistant reply.
+func (c *Client) Chat(ctx context.Context, systemPrompt, userMessage string) (string, error) {
 	resp, err := c.inner.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Model:       c.model,
-		Messages:    messages,
+		Model: c.model,
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage(systemPrompt),
+			openai.UserMessage(userMessage),
+		},
 		Temperature: param.NewOpt[float64](0.1),
 		MaxTokens:   param.NewOpt[int64](c.maxTokens),
 	})

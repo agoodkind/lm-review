@@ -4,16 +4,16 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 
-	"github.com/openai/openai-go/v3"
-
-	"goodkind.io/lm-review/internal/lmstudio"
+	"golang.org/x/sync/errgroup"
 )
 
 // ChunkedRepoReview reviews a large codebase by splitting it into chunks,
 // reviewing each independently, then merging the results into one Result.
 // chunkBytes controls the max bytes per chunk sent to the LLM.
-func ChunkedRepoReview(ctx context.Context, client *lmstudio.Client, files string, scope string, rules []string, chunkBytes int) (*Result, error) {
+// parallelism controls how many chunks are reviewed concurrently (1 = sequential).
+func ChunkedRepoReview(ctx context.Context, client ChatClient, files string, scope string, rules []string, chunkBytes, parallelism int) (*Result, error) {
 	chunks := splitIntoChunks(files, chunkBytes)
 
 	if len(chunks) == 1 {
@@ -21,39 +21,67 @@ func ChunkedRepoReview(ctx context.Context, client *lmstudio.Client, files strin
 		return r.ReviewRepo(ctx, files)
 	}
 
-	// Review each chunk independently.
+	if parallelism < 1 {
+		parallelism = 1
+	}
+
+	type chunkResult struct {
+		index  int
+		result *Result
+	}
+
+	var (
+		mu      sync.Mutex
+		results []chunkResult
+	)
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(parallelism)
+
+	for i, chunk := range chunks {
+		g.Go(func() error {
+			raw, err := client.Chat(gctx, BuildSystemPrompt(rules), ChunkPrompt(chunk, i+1, len(chunks)))
+			if err != nil && raw == "" {
+				return fmt.Errorf("chunk %d/%d review: %w", i+1, len(chunks), err)
+			}
+
+			result, parseErr := Parse(raw)
+			if parseErr != nil {
+				return nil // soft failure: skip bad chunks
+			}
+
+			mu.Lock()
+			results = append(results, chunkResult{index: i, result: result})
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	// Sort by chunk index to maintain deterministic ordering.
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].index < results[j].index
+	})
+
 	var allIssues []Issue
 	var summaries []string
 	var techDebts []string
 	var highlights []string
 	worstVerdict := VerdictPass
 
-	for i, chunk := range chunks {
-		raw, err := client.Chat(ctx, []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage(BuildSystemPrompt(rules)),
-			openai.UserMessage(ChunkPrompt(chunk, i+1, len(chunks))),
-		})
-		if err != nil && raw == "" {
-			return nil, fmt.Errorf("chunk %d/%d review: %w", i+1, len(chunks), err)
+	for _, cr := range results {
+		r := cr.result
+		allIssues = append(allIssues, r.Issues...)
+		summaries = append(summaries, r.Summary)
+		if r.TechDebt != "" {
+			techDebts = append(techDebts, r.TechDebt)
 		}
-		// If Chat returned a repetition-loop error with partial content,
-		// attempt to salvage by parsing what we got.
-
-		result, err := Parse(raw)
-		if err != nil {
-			// Soft failure: skip bad chunks, continue.
-			continue
-		}
-
-		allIssues = append(allIssues, result.Issues...)
-		summaries = append(summaries, result.Summary)
-		if result.TechDebt != "" {
-			techDebts = append(techDebts, result.TechDebt)
-		}
-		highlights = append(highlights, result.Highlights...)
-
-		if verdictWeight(result.Verdict) > verdictWeight(worstVerdict) {
-			worstVerdict = result.Verdict
+		highlights = append(highlights, r.Highlights...)
+		if verdictWeight(r.Verdict) > verdictWeight(worstVerdict) {
+			worstVerdict = r.Verdict
 		}
 	}
 

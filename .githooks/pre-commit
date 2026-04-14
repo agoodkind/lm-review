@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Pre-commit: run lm-review on staged changes.
+# Blocks the commit if verdict is "block".
+command -v lm-review >/dev/null 2>&1 || exit 0
+
+output=$(lm-review diff 2>&1)
+status=$?
+
+echo "$output"
+
+if [ $status -ne 0 ]; then
+    echo "lm-review failed, allowing commit anyway"
+    exit 0
+fi
+
+if echo "$output" | grep -q "BLOCK"; then
+    echo ""
+    echo "Commit blocked by lm-review. Fix the issues above or commit with --no-verify to skip."
+    exit 1
+fi

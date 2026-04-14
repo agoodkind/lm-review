@@ -15,6 +15,7 @@ import (
 
 	"goodkind.io/lm-review/api/reviewpb"
 	"goodkind.io/lm-review/internal/audit"
+	"goodkind.io/lm-review/internal/claude"
 	"goodkind.io/lm-review/internal/config"
 	"goodkind.io/lm-review/internal/lmstudio"
 	"goodkind.io/lm-review/internal/review"
@@ -81,18 +82,27 @@ func (s *Server) ReviewRepo(ctx context.Context, req *reviewpb.ReviewRequest) (*
 func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.ReviewRequest) (*reviewpb.ReviewResponse, error) {
 	start := time.Now()
 
-	// Request model overrides config; config resolves per-scope then global.
-	model := req.Model
-	if model == "" {
-		model = s.cfg.LMStudio.ResolveModel(scope, req.Deep)
-	}
+	// Build the appropriate ChatClient based on provider config.
+	var client review.ChatClient
+	var model string
 
-	// Ensure model is loaded with the configured context length.
-	if err := lmstudio.EnsureLoaded(ctx, model, s.cfg.LMStudio.ResolveContextLength()); err != nil {
-		s.log.Write(audit.Entry{Scope: scope, Error: fmt.Sprintf("model load: %v", err)})
+	switch s.cfg.ResolveProvider() {
+	case "claude":
+		model = s.cfg.Claude.Model
+		if req.Model != "" {
+			model = req.Model
+		}
+		client = claude.New(model)
+	default:
+		model = req.Model
+		if model == "" {
+			model = s.cfg.LMStudio.ResolveModel(scope, req.Deep)
+		}
+		if err := lmstudio.EnsureLoaded(ctx, model, s.cfg.LMStudio.ResolveContextLength()); err != nil {
+			s.log.Write(audit.Entry{Scope: scope, Error: fmt.Sprintf("model load: %v", err)})
+		}
+		client = lmstudio.New(s.cfg.LMStudio.URL, s.cfg.LMStudio.Token, model, s.cfg.LMStudio.ResolveMaxResponseTokens())
 	}
-
-	client := lmstudio.New(s.cfg.LMStudio.URL, s.cfg.LMStudio.Token, model, s.cfg.LMStudio.ResolveMaxResponseTokens())
 
 	// Merge project-local rules from <path>/.lm-review.toml if present.
 	cfg := s.cfg
@@ -120,7 +130,7 @@ func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.Revi
 	)
 	repoMaxBytes := s.cfg.LMStudio.ResolveRepoMaxBytes()
 	if scope == "repo" && len(req.Diff) > repoMaxBytes {
-		result, err = review.ChunkedRepoReview(ctx, client, req.Diff, scope, rules, repoMaxBytes)
+		result, err = review.ChunkedRepoReview(ctx, client, req.Diff, scope, rules, repoMaxBytes, s.cfg.LMStudio.ResolveChunkParallelism())
 	} else {
 		r := review.New(client, scope, rules)
 		result, err = r.ReviewDiff(ctx, req.Diff)

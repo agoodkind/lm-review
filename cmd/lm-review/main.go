@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -15,12 +17,19 @@ import (
 	"goodkind.io/lm-review/internal/github"
 	"goodkind.io/lm-review/internal/mcpserver"
 	"goodkind.io/lm-review/internal/version"
+	"goodkind.io/lm-review/internal/xdg"
 )
 
 var log = slog.Default()
 
 func init() {
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil).WithAttrs([]slog.Attr{
+	w := io.Writer(os.Stderr)
+	logPath := xdg.DaemonLogPath()
+	_ = os.MkdirAll(filepath.Dir(logPath), 0o700)
+	if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600); err == nil {
+		w = io.MultiWriter(os.Stderr, f)
+	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(w, nil).WithAttrs([]slog.Attr{
 		slog.String("commit", version.Commit),
 		slog.String("version", version.Version),
 		slog.String("buildHash", version.BuildHash()),

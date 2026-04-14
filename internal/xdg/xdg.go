@@ -52,3 +52,8 @@ func AuditLogPath() string {
 func DaemonSocketPath() string {
 	return filepath.Join(RuntimeDir(), "daemon.sock")
 }
+
+// DaemonLogPath returns the path to the daemon log file.
+func DaemonLogPath() string {
+	return filepath.Join(StateDir(), "daemon.log")
+}
