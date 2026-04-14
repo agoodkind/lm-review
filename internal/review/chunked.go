@@ -3,6 +3,7 @@ package review
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 
@@ -47,7 +48,8 @@ func ChunkedRepoReview(ctx context.Context, client ChatClient, files string, sco
 
 			result, parseErr := Parse(raw)
 			if parseErr != nil {
-				return nil // soft failure: skip bad chunks
+				slog.Warn("skipping unparseable chunk", "chunk", i+1, "total", len(chunks), "err", parseErr)
+				return nil
 			}
 
 			mu.Lock()

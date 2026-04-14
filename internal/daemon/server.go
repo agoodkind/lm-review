@@ -79,30 +79,30 @@ func (s *Server) ReviewRepo(ctx context.Context, req *reviewpb.ReviewRequest) (*
 	return s.runReview(ctx, "repo", req)
 }
 
-func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.ReviewRequest) (*reviewpb.ReviewResponse, error) {
-	start := time.Now()
-
-	// Build the appropriate ChatClient based on provider config.
-	var client review.ChatClient
-	var model string
-
-	switch s.cfg.ResolveProvider() {
-	case "claude":
-		model = s.cfg.Claude.Model
+// buildClient constructs the appropriate ChatClient and resolves the model name.
+func (s *Server) buildClient(ctx context.Context, scope string, req *reviewpb.ReviewRequest) (review.ChatClient, string) {
+	if s.cfg.ResolveProvider() == "claude" {
+		model := s.cfg.Claude.Model
 		if req.Model != "" {
 			model = req.Model
 		}
-		client = claude.New(model)
-	default:
-		model = req.Model
-		if model == "" {
-			model = s.cfg.LMStudio.ResolveModel(scope, req.Deep)
-		}
-		if err := lmstudio.EnsureLoaded(ctx, model, s.cfg.LMStudio.ResolveContextLength()); err != nil {
-			s.log.Write(audit.Entry{Scope: scope, Error: fmt.Sprintf("model load: %v", err)})
-		}
-		client = lmstudio.New(s.cfg.LMStudio.URL, s.cfg.LMStudio.Token, model, s.cfg.LMStudio.ResolveMaxResponseTokens())
+		return claude.New(model), model
 	}
+
+	model := req.Model
+	if model == "" {
+		model = s.cfg.LMStudio.ResolveModel(scope, req.Deep)
+	}
+	if err := lmstudio.EnsureLoaded(ctx, model, s.cfg.LMStudio.ResolveContextLength()); err != nil {
+		s.log.Write(audit.Entry{Scope: scope, Error: fmt.Sprintf("model load: %v", err)})
+	}
+	return lmstudio.New(s.cfg.LMStudio.URL, s.cfg.LMStudio.Token, model, s.cfg.LMStudio.ResolveMaxResponseTokens()), model
+}
+
+func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.ReviewRequest) (*reviewpb.ReviewResponse, error) {
+	start := time.Now()
+
+	client, model := s.buildClient(ctx, scope, req)
 
 	// Merge project-local rules from <path>/.lm-review.toml if present.
 	cfg := s.cfg
