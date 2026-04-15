@@ -7,11 +7,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"time"
 
 	"google.golang.org/grpc"
+
+	"goodkind.io/lmctl"
 
 	"goodkind.io/lm-review/api/reviewpb"
 	"goodkind.io/lm-review/internal/audit"
@@ -80,20 +83,56 @@ func (s *Server) ReviewRepo(ctx context.Context, req *reviewpb.ReviewRequest) (*
 }
 
 // buildClient constructs the appropriate ChatClient and resolves the model name.
-func (s *Server) buildClient(ctx context.Context, scope string, req *reviewpb.ReviewRequest) (review.ChatClient, string) {
+// If model_priority is configured and a higher-ranked model is already loaded,
+// it will be used instead of swapping to the tier's default model.
+func (s *Server) buildClient(ctx context.Context, scope string, depth string, modelOverride string) (review.ChatClient, string) {
 	if s.cfg.ResolveProvider() == "claude" {
 		model := s.cfg.Claude.Model
-		if req.Model != "" {
-			model = req.Model
+		if modelOverride != "" {
+			model = modelOverride
 		}
 		return claude.New(model), model
 	}
 
-	model := req.Model
+	model := modelOverride
 	if model == "" {
-		model = s.cfg.LMStudio.ResolveModel(scope, req.Deep)
+		model = s.cfg.LMStudio.ResolveModel(scope, depth)
 	}
-	if err := lmstudio.EnsureLoaded(ctx, model, s.cfg.LMStudio.ResolveContextLength()); err != nil {
+
+	// Check what's already loaded for substitution and eviction decisions.
+	loaded, _ := lmctl.ListLoaded(ctx)
+	loadedNames := make([]string, len(loaded))
+	for i, m := range loaded {
+		loadedNames[i] = m.ModelKey
+	}
+
+	// If a higher-priority model is already warm, use it instead.
+	if modelOverride == "" && len(s.cfg.LMStudio.ModelPriority) > 0 && len(loaded) > 0 {
+		if sub := s.cfg.LMStudio.PreferLoaded(model, loadedNames); sub != model {
+			slog.Info("using warm higher-priority model",
+				"requested", model, "using", sub, "depth", depth)
+			model = sub
+		}
+	}
+
+	// If eviction is disabled, only use what's already loaded.
+	if !s.cfg.LMStudio.CanEvict() {
+		for _, name := range loadedNames {
+			if lmctl.BaseModelName(name) == lmctl.BaseModelName(model) {
+				return lmstudio.New(s.cfg.LMStudio.URL, s.cfg.LMStudio.Token, model, s.cfg.LMStudio.ResolveMaxResponseTokens()), model
+			}
+		}
+		// Requested model isn't loaded. Return nil client; caller handles the skip.
+		slog.Warn("model not loaded and eviction disabled, skipping review",
+			"model", model, "depth", depth)
+		return nil, model
+	}
+
+	if err := lmctl.EnsureLoaded(ctx, model,
+		lmctl.WithContextLength(s.cfg.LMStudio.ResolveContextLength()),
+		lmctl.WithMaxMemoryBytes(s.cfg.LMStudio.ResolveMaxMemoryBytes()),
+		lmctl.WithWarmup(s.cfg.LMStudio.URL, s.cfg.LMStudio.Token),
+	); err != nil {
 		s.log.Write(audit.Entry{Scope: scope, Error: fmt.Sprintf("model load: %v", err)})
 	}
 	return lmstudio.New(s.cfg.LMStudio.URL, s.cfg.LMStudio.Token, model, s.cfg.LMStudio.ResolveMaxResponseTokens()), model
@@ -102,7 +141,20 @@ func (s *Server) buildClient(ctx context.Context, scope string, req *reviewpb.Re
 func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.ReviewRequest) (*reviewpb.ReviewResponse, error) {
 	start := time.Now()
 
-	client, model := s.buildClient(ctx, scope, req)
+	depth := req.Depth
+	if depth == "" {
+		depth = "normal"
+	}
+
+	client, model := s.buildClient(ctx, scope, depth, req.Model)
+	if client == nil {
+		return &reviewpb.ReviewResponse{
+			Verdict:   "skip",
+			Summary:   fmt.Sprintf("Skipped: model %s not loaded and eviction disabled.", model),
+			Model:     model,
+			LatencyMs: time.Since(start).Milliseconds(),
+		}, nil
+	}
 
 	// Merge project-local rules from <path>/.lm-review.toml if present.
 	cfg := s.cfg
@@ -124,6 +176,17 @@ func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.Revi
 	files := review.FilesFromDiff(req.Diff)
 	rules := review.FilterRules(texts, filters, files)
 
+	// Pick prompt builder based on depth tier.
+	var buildPrompt review.PromptBuilder
+	switch depth {
+	case "quick":
+		buildPrompt = review.BuildQuickSystemPrompt
+	case "deep", "ultra":
+		buildPrompt = review.BuildDeepSystemPrompt
+	default:
+		buildPrompt = review.BuildSystemPrompt
+	}
+
 	var (
 		result *review.Result
 		err    error
@@ -132,8 +195,24 @@ func (s *Server) runReview(ctx context.Context, scope string, req *reviewpb.Revi
 	if scope == "repo" && len(req.Diff) > repoMaxBytes {
 		result, err = review.ChunkedRepoReview(ctx, client, req.Diff, scope, rules, repoMaxBytes, s.cfg.LMStudio.ResolveChunkParallelism())
 	} else {
-		r := review.New(client, scope, rules)
+		r := review.NewWithPromptBuilder(client, scope, rules, buildPrompt)
 		result, err = r.ReviewDiff(ctx, req.Diff)
+	}
+
+	// Ultra: verify sweep results with the ultra model to filter false positives.
+	if err == nil && depth == "ultra" && result != nil && len(result.Issues) > 0 {
+		verifyClient, verifyModel := s.buildClient(ctx, scope, "ultra", "")
+		verified, verifyErr := review.VerifyIssues(ctx, verifyClient, result.Issues, req.Diff)
+		if verifyErr == nil {
+			beforeCount := len(result.Issues)
+			result.Issues = verified
+			model = verifyModel // report the verify model
+			s.log.Write(audit.Entry{
+				Scope: scope,
+				Model: verifyModel,
+				Error: fmt.Sprintf("ultra verify: %d→%d issues", beforeCount, len(verified)),
+			})
+		}
 	}
 
 	latency := time.Since(start).Milliseconds()

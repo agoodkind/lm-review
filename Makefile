@@ -57,11 +57,17 @@ setup-hooks:
 review-diff:
 	lm-review diff
 
+review-quick:
+	lm-review diff --depth quick
+
 review-pr:
 	lm-review pr
 
 review-deep:
-	lm-review diff --deep &
+	lm-review diff --depth deep &
+
+review-ultra:
+	lm-review diff --depth ultra &
 
 review-repo:
 	lm-review repo --async

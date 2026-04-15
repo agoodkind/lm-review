@@ -12,6 +12,9 @@ type Reviewer struct {
 	systemPrompt string
 }
 
+// PromptBuilder is a function that constructs a system prompt from rules.
+type PromptBuilder func(rules []string) string
+
 // New creates a Reviewer. Rules are injected from config so the system prompt
 // is never hardcoded in source.
 func New(client ChatClient, scope string, rules []string) *Reviewer {
@@ -19,6 +22,16 @@ func New(client ChatClient, scope string, rules []string) *Reviewer {
 		client:       client,
 		scope:        scope,
 		systemPrompt: BuildSystemPrompt(rules),
+	}
+}
+
+// NewWithPromptBuilder creates a Reviewer with a custom prompt builder.
+// Use BuildQuickSystemPrompt for quick mode, BuildSystemPrompt for all others.
+func NewWithPromptBuilder(client ChatClient, scope string, rules []string, build PromptBuilder) *Reviewer {
+	return &Reviewer{
+		client:       client,
+		scope:        scope,
+		systemPrompt: build(rules),
 	}
 }
 

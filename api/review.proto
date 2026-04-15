@@ -12,7 +12,7 @@ service LMReviewD {
 
 message ReviewRequest {
   string diff    = 1;
-  bool   deep    = 2;
+  string depth   = 2; // quick | normal | deep | ultra (empty = normal)
   string context = 3; // optional extra context (e.g. PR title)
   string model   = 4; // override model for this request (empty = use config)
   string path    = 5; // absolute path to repo root for project-local rule loading

@@ -57,12 +57,15 @@ func main() {
 }
 
 func newDiffCmd() *cobra.Command {
-	var deep bool
-	var model string
+	var depth, model string
+	var deepCompat bool
 	cmd := &cobra.Command{
 		Use:   "diff",
 		Short: "Review staged changes (runs on make build)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if deepCompat {
+				depth = "deep"
+			}
 			repoRoot, err := gitutil.Root("")
 			if err != nil {
 				log.Info("skipping review: not in a git repo")
@@ -72,21 +75,26 @@ func newDiffCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runReview(cmd.Context(), "diff", diff, repoRoot, deep, model)
+			return runReview(cmd.Context(), "diff", diff, repoRoot, depth, model)
 		},
 	}
-	cmd.Flags().BoolVar(&deep, "deep", false, "Use deep model from config")
+	cmd.Flags().StringVar(&depth, "depth", "normal", "Review depth: quick, normal, deep, ultra")
 	cmd.Flags().StringVar(&model, "model", "", "Override model for this request")
+	cmd.Flags().BoolVar(&deepCompat, "deep", false, "Alias for --depth deep (deprecated)")
+	_ = cmd.Flags().MarkHidden("deep")
 	return cmd
 }
 
 func newPRCmd() *cobra.Command {
-	var deep bool
-	var model string
+	var depth, model string
+	var deepCompat bool
 	cmd := &cobra.Command{
 		Use:   "pr",
 		Short: "Review diff against main branch",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if deepCompat {
+				depth = "deep"
+			}
 			repoRoot, err := gitutil.Root("")
 			if err != nil {
 				return err
@@ -95,22 +103,27 @@ func newPRCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runReview(cmd.Context(), "pr", diff, repoRoot, deep, model)
+			return runReview(cmd.Context(), "pr", diff, repoRoot, depth, model)
 		},
 	}
-	cmd.Flags().BoolVar(&deep, "deep", false, "Use deep model from config")
+	cmd.Flags().StringVar(&depth, "depth", "normal", "Review depth: quick, normal, deep, ultra")
 	cmd.Flags().StringVar(&model, "model", "", "Override model for this request")
+	cmd.Flags().BoolVar(&deepCompat, "deep", false, "Alias for --depth deep (deprecated)")
+	_ = cmd.Flags().MarkHidden("deep")
 	return cmd
 }
 
 func newRepoCmd() *cobra.Command {
 	var async bool
-	var deep bool
-	var model string
+	var depth, model string
+	var deepCompat bool
 	cmd := &cobra.Command{
 		Use:   "repo",
 		Short: "Full repo health review",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if deepCompat {
+				depth = "deep"
+			}
 			if async {
 				return runRepoAsync()
 			}
@@ -130,7 +143,7 @@ func newRepoCmd() *cobra.Command {
 			}
 			defer client.Close()
 
-			resp, err := client.ReviewRepo(cmd.Context(), files, repoRoot, deep, model)
+			resp, err := client.ReviewRepo(cmd.Context(), files, repoRoot, depth, model)
 			if err != nil {
 				return err
 			}
@@ -143,8 +156,10 @@ func newRepoCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&async, "async", false, "Run in background, post result when done")
-	cmd.Flags().BoolVar(&deep, "deep", false, "Use deep model from config")
+	cmd.Flags().StringVar(&depth, "depth", "normal", "Review depth: quick, normal, deep, ultra")
 	cmd.Flags().StringVar(&model, "model", "", "Override model for this request")
+	cmd.Flags().BoolVar(&deepCompat, "deep", false, "Alias for --depth deep (deprecated)")
+	_ = cmd.Flags().MarkHidden("deep")
 	return cmd
 }
 
@@ -170,7 +185,7 @@ func newMCPCmd() *cobra.Command {
 }
 
 
-func runReview(ctx context.Context, scope, diff, repoPath string, deep bool, model string) error {
+func runReview(ctx context.Context, scope, diff, repoPath string, depth string, model string) error {
 	client, err := daemon.Connect(ctx)
 	if err != nil {
 		log.Info("skipping review: daemon unavailable", "err", err)
@@ -181,9 +196,9 @@ func runReview(ctx context.Context, scope, diff, repoPath string, deep bool, mod
 	var resp *reviewpb.ReviewResponse
 	switch scope {
 	case "diff":
-		resp, err = client.ReviewDiff(ctx, diff, repoPath, deep, model)
+		resp, err = client.ReviewDiff(ctx, diff, repoPath, depth, model)
 	case "pr":
-		resp, err = client.ReviewPR(ctx, diff, repoPath, deep, model)
+		resp, err = client.ReviewPR(ctx, diff, repoPath, depth, model)
 	}
 	if err != nil {
 		return fmt.Errorf("review: %w", err)

@@ -60,13 +60,15 @@ Interactive review launcher. Picks the right scope and depth based on your inten
 
 ## Depth
 
-- **fast** (default): Uses the fast model for quick feedback on diffs and PRs.
-- **deep**: Uses a larger model for thorough analysis. Best for full repo reviews or critical PRs.
+- **quick**: Security and correctness only. Fastest model, minimal output. Best for build hooks.
+- **normal** (default): Full rules, fast model. Best for everyday diffs and PRs.
+- **deep**: Full rules, larger model. More thorough analysis for critical PRs.
+- **ultra**: Two-pass pipeline. Fast model sweeps for issues, then the largest model verifies each one to filter false positives. Most thorough but slowest.
 
 ## Configuration
 
 Config lives at ` + "`~/.config/lm-review/config.toml`" + `. Key settings:
-- ` + "`fast_model`" + ` / ` + "`deep_model`" + `: which LM Studio models to use
+- ` + "`quick_model`" + ` / ` + "`fast_model`" + ` / ` + "`deep_model`" + ` / ` + "`ultra_model`" + `: which LM Studio models to use
 - ` + "`context_length`" + `: token context window for model loading
 - ` + "`max_response_tokens`" + `: cap on response length
 - ` + "`[[rules]]`" + `: custom review rules with optional glob filters
@@ -99,7 +101,7 @@ Available tools:
 - review_repo: Full repository health review. Scans all source files for tech debt, security issues, and structural problems.
 
 Each tool accepts:
-- deep (bool): Use the deep model for more thorough analysis. Slower but catches more.
+- depth (string): "quick" (security+correctness only), "normal" (default), "deep" (larger model), "ultra" (two-pass verification).
 - model (string): Override the model for this request.
 - path (string): Path to git repo root. Auto-detected if omitted.
 
@@ -116,15 +118,19 @@ Start by checking if there are staged changes with "git diff --cached --stat". I
 		mcp.Description("Override the model for this request (e.g. 'qwen/qwen3-coder-next'). Uses config default if omitted."),
 	)
 
+	depthFlag := mcp.WithString("depth",
+		mcp.Description("Review depth: quick (security+correctness only), normal (default), deep (larger model), ultra (two-pass verification with largest model)."),
+	)
+
 	s.AddTool(
 		mcp.NewTool("review_diff",
 			mcp.WithDescription("Review staged git changes for code quality, style, and correctness."),
-			mcp.WithBoolean("deep", mcp.Description("Use the deep model from config (or pass model= to specify any model).")),
+			depthFlag,
 			mcp.WithString("path", mcp.Description("Path to git repo root (optional, auto-detected if omitted).")),
 			modelFlag,
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			deep := req.GetBool("deep", false)
+			depth := req.GetString("depth", "normal")
 			model := req.GetString("model", "")
 			repoRoot, err := gitutil.Root(req.GetString("path", ""))
 			if err != nil {
@@ -135,7 +141,7 @@ Start by checking if there are staged changes with "git diff --cached --stat". I
 				return mcp.NewToolResultText("No staged changes to review. Stage files with `git add` first."), nil
 			}
 			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-				return c.ReviewDiff(ctx, diff, repoRoot, deep, model)
+				return c.ReviewDiff(ctx, diff, repoRoot, depth, model)
 			})
 		},
 	)
@@ -143,12 +149,12 @@ Start by checking if there are staged changes with "git diff --cached --stat". I
 	s.AddTool(
 		mcp.NewTool("review_pr",
 			mcp.WithDescription("Review all changes on the current branch vs main."),
-			mcp.WithBoolean("deep", mcp.Description("Use the deep model from config (or pass model= to specify any model).")),
+			depthFlag,
 			mcp.WithString("path", mcp.Description("Path to git repo root (optional, auto-detected if omitted).")),
 			modelFlag,
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			deep := req.GetBool("deep", false)
+			depth := req.GetString("depth", "normal")
 			model := req.GetString("model", "")
 			repoRoot, err := gitutil.Root(req.GetString("path", ""))
 			if err != nil {
@@ -159,7 +165,7 @@ Start by checking if there are staged changes with "git diff --cached --stat". I
 				return mcp.NewToolResultText("No changes vs main branch, or main branch not found."), nil
 			}
 			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-				return c.ReviewPR(ctx, diff, repoRoot, deep, model)
+				return c.ReviewPR(ctx, diff, repoRoot, depth, model)
 			})
 		},
 	)
@@ -167,12 +173,12 @@ Start by checking if there are staged changes with "git diff --cached --stat". I
 	s.AddTool(
 		mcp.NewTool("review_repo",
 			mcp.WithDescription("Full repository health review: tech debt, structural issues, improvement opportunities."),
-			mcp.WithBoolean("deep", mcp.Description("Use the deep model from config (or pass model= to specify any model). Defaults to false - uses repo model from config.")),
+			depthFlag,
 			mcp.WithString("path", mcp.Description("Path to git repo root (optional, auto-detected if omitted).")),
 			modelFlag,
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			deep := req.GetBool("deep", false)
+			depth := req.GetString("depth", "normal")
 			model := req.GetString("model", "")
 			repoRoot, err := gitutil.Root(req.GetString("path", ""))
 			if err != nil {
@@ -183,7 +189,7 @@ Start by checking if there are staged changes with "git diff --cached --stat". I
 				return mcp.NewToolResultText("No Go files found in repo."), nil
 			}
 			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-				return c.ReviewRepo(ctx, files, repoRoot, deep, model)
+				return c.ReviewRepo(ctx, files, repoRoot, depth, model)
 			})
 		},
 	)

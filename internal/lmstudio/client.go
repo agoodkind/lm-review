@@ -5,8 +5,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os/exec"
-	"strconv"
 	"strings"
 
 	"github.com/openai/openai-go/v3"
@@ -83,70 +81,6 @@ func detectRepetition(s string) error {
 // ModelID returns the model identifier this client is configured to use.
 func (c *Client) ModelID() string {
 	return c.model
-}
-
-// EnsureLoaded loads the model via `lms load` with the given context length
-// if it is not already loaded with sufficient context. This is a no-op if lms
-// is not on PATH.
-func EnsureLoaded(ctx context.Context, model string, contextLen int) error {
-	lms, err := exec.LookPath("lms")
-	if err != nil {
-		return nil // lms not installed, skip
-	}
-
-	// Check if already loaded with sufficient context.
-	out, err := exec.CommandContext(ctx, lms, "ps").Output()
-	if err == nil && isLoadedWithContext(string(out), model, contextLen) {
-		return nil
-	}
-
-	// Unload everything first to avoid duplicate instances.
-	_ = exec.CommandContext(ctx, lms, "unload", "--all").Run()
-
-	cmd := exec.CommandContext(ctx, lms, "load", model,
-		"-c", fmt.Sprintf("%d", contextLen),
-		"-y",
-	)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("lms load %s: %w\n%s", model, err, output)
-	}
-	return nil
-}
-
-// baseModelName strips the publisher prefix (e.g. "qwen/qwen3-coder-next"
-// becomes "qwen3-coder-next") so we match regardless of namespace.
-func baseModelName(model string) string {
-	if i := strings.LastIndex(model, "/"); i >= 0 {
-		return model[i+1:]
-	}
-	return model
-}
-
-// isLoadedWithContext checks lms ps output to see if the model is loaded
-// and its context length is at least the required size. Matches on the base
-// model name to handle namespaced vs bare identifiers.
-func isLoadedWithContext(psOutput, model string, requiredCtx int) bool {
-	base := baseModelName(model)
-	for _, line := range strings.Split(psOutput, "\n") {
-		if !strings.Contains(line, base) {
-			continue
-		}
-		// Parse context column from the tabular lms ps output.
-		fields := strings.Fields(line)
-		for i, f := range fields {
-			if i < 3 {
-				continue
-			}
-			ctx, err := strconv.Atoi(f)
-			if err != nil {
-				continue
-			}
-			return ctx >= requiredCtx
-		}
-		// Model found but couldn't parse context - reload to be safe.
-		return false
-	}
-	return false
 }
 
 // Ping checks the server is reachable and the token is valid.

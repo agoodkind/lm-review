@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 
@@ -33,10 +34,12 @@ func (c Config) ResolveProvider() string {
 }
 
 // ModeModels holds per-mode model overrides.
-// Falls back to the global fast_model/deep_model if not set.
+// Falls back to the global quick/fast/deep/ultra_model if not set.
 type ModeModels struct {
-	Model     string `toml:"model,omitempty"`
-	DeepModel string `toml:"deep_model,omitempty"`
+	QuickModel string `toml:"quick_model,omitempty"`
+	Model      string `toml:"model,omitempty"`
+	DeepModel  string `toml:"deep_model,omitempty"`
+	UltraModel string `toml:"ultra_model,omitempty"`
 }
 
 // LMStudio holds connection and model settings.
@@ -44,11 +47,26 @@ type ModeModels struct {
 type LMStudio struct {
 	URL           string `toml:"url"`
 	Token         string `toml:"token"`
+	QuickModel    string `toml:"quick_model"`
 	FastModel     string `toml:"fast_model"`
 	DeepModel     string `toml:"deep_model"`
+	UltraModel    string `toml:"ultra_model"`
 	ContextLength     int `toml:"context_length,omitempty"`      // tokens; passed to lms load -c (default 32768)
 	MaxResponseTokens int `toml:"max_response_tokens,omitempty"` // max response tokens per request (default 8192)
 	ChunkParallelism  int `toml:"chunk_parallelism,omitempty"`   // parallel chunk reviews for large repos (default 1)
+	MaxMemoryGB       int `toml:"max_memory_gb,omitempty"`       // max GB of models to keep loaded (default: 75% of system RAM)
+
+	// ModelPriority is an ordered list of models from weakest to strongest.
+	// When a tier requests a model and a higher-priority model is already
+	// loaded and warm, the loaded model is used instead of swapping.
+	// Empty list disables substitution (always load the exact model requested).
+	ModelPriority []string `toml:"model_priority,omitempty"`
+
+	// AllowEviction controls whether lm-review may load/unload models.
+	// When false, only already-loaded models are used. If no suitable model
+	// is loaded, the review is skipped. Prevents disrupting active coding
+	// sessions. Defaults to true if not set.
+	AllowEviction *bool `toml:"allow_eviction,omitempty"`
 
 	// Per-mode overrides. Falls back to FastModel/DeepModel if not set.
 	Diff ModeModels `toml:"diff,omitempty"`
@@ -80,6 +98,14 @@ func (l LMStudio) ResolveChunkParallelism() int {
 	return 1
 }
 
+// ResolveMaxMemoryBytes returns the max bytes of model memory to keep loaded.
+func (l LMStudio) ResolveMaxMemoryBytes() int64 {
+	if l.MaxMemoryGB > 0 {
+		return int64(l.MaxMemoryGB) * 1024 * 1024 * 1024
+	}
+	return 0 // 0 means auto-detect in the caller
+}
+
 // ResolveRepoMaxBytes returns the max bytes of source to send for a repo review.
 // Derived from context_length: ~75% of context budget (in chars, ~4 chars/token)
 // minus room for system prompt and response.
@@ -90,9 +116,10 @@ func (l LMStudio) ResolveRepoMaxBytes() int {
 	return ctx * 3
 }
 
-// ResolveModel returns the model to use for a given scope and deep flag.
-// Resolution: per-mode config → global fast/deep → empty string.
-func (l LMStudio) ResolveModel(scope string, deep bool) string {
+// ResolveModel returns the model to use for a given scope and depth.
+// Depth values: "quick", "normal" (or ""), "deep", "ultra".
+// Resolution: per-mode config → global tier model → fallback to next lower tier.
+func (l LMStudio) ResolveModel(scope string, depth string) string {
 	var mode ModeModels
 	switch scope {
 	case "diff":
@@ -103,17 +130,90 @@ func (l LMStudio) ResolveModel(scope string, deep bool) string {
 		mode = l.Repo
 	}
 
-	if deep {
+	switch depth {
+	case "quick":
+		if mode.QuickModel != "" {
+			return mode.QuickModel
+		}
+		if l.QuickModel != "" {
+			return l.QuickModel
+		}
+		return l.FastModel // fall back to fast
+	case "deep":
 		if mode.DeepModel != "" {
 			return mode.DeepModel
 		}
 		return l.DeepModel
+	case "ultra":
+		if mode.UltraModel != "" {
+			return mode.UltraModel
+		}
+		if l.UltraModel != "" {
+			return l.UltraModel
+		}
+		return l.DeepModel // fall back to deep
+	default: // "normal" or ""
+		if mode.Model != "" {
+			return mode.Model
+		}
+		return l.FastModel
+	}
+}
+
+// CanEvict returns whether lm-review is allowed to load/unload models.
+// Defaults to true if not configured.
+func (l LMStudio) CanEvict() bool {
+	if l.AllowEviction == nil {
+		return true
+	}
+	return *l.AllowEviction
+}
+
+// PreferLoaded checks whether a loaded model should be used instead of the
+// requested model, based on model_priority. Returns the substitute model name
+// if a higher-priority model is loaded, or the original model if not.
+// loadedModels should come from lmctl.ListLoaded().
+func (l LMStudio) PreferLoaded(requested string, loadedModels []string) string {
+	if len(l.ModelPriority) == 0 {
+		return requested
 	}
 
-	if mode.Model != "" {
-		return mode.Model
+	reqRank := l.modelRank(requested)
+	if reqRank < 0 {
+		return requested // requested model not in priority list, no substitution
 	}
-	return l.FastModel
+
+	bestRank := reqRank
+	bestModel := requested
+	for _, loaded := range loadedModels {
+		rank := l.modelRank(loaded)
+		if rank > bestRank {
+			bestRank = rank
+			bestModel = loaded
+		}
+	}
+	return bestModel
+}
+
+// modelRank returns the index of a model in ModelPriority, matching on base
+// name (strips publisher prefix). Returns -1 if not found.
+func (l LMStudio) modelRank(model string) int {
+	base := baseModelName(model)
+	for i, m := range l.ModelPriority {
+		if baseModelName(m) == base {
+			return i
+		}
+	}
+	return -1
+}
+
+// baseModelName strips the publisher prefix (e.g. "qwen/qwen3-coder-next"
+// becomes "qwen3-coder-next").
+func baseModelName(model string) string {
+	if i := strings.LastIndex(model, "/"); i >= 0 {
+		return model[i+1:]
+	}
+	return model
 }
 
 // Rule is a single review instruction sent to the LLM.

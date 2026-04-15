@@ -8,9 +8,80 @@ import (
 	"strings"
 )
 
-const systemPromptHeader = `You are a strict code reviewer. Return ONLY valid JSON matching the schema below - no prose, no markdown fences.`
+// --- Shared issue schema (used by all tiers) ---
 
-const systemPromptSchema = `
+const issueSchema = `
+    {
+      "severity": "error" | "warning" | "info",
+      "file": "path/to/file.go",
+      "line": 42,
+      "end_line": 45,
+      "rule": "short-rule-name",
+      "message": "what is wrong and why",
+      "suggestion": "concrete fix"
+    }`
+
+const verdictRules = `
+Verdict rules:
+- "block": any error-severity issue
+- "warn": warnings present but no blockers
+- "pass": clean or only informational notes`
+
+// --- Quick tier ---
+// Same rules, same rigor, terse output. Speed comes from shorter messages
+// and no extras (highlights, tech_debt). The model checks everything but
+// explains minimally.
+
+const quickPromptHeader = `You are a code reviewer. Enforce every rule below. Be terse: short messages, no elaboration.
+Return ONLY valid JSON - no prose, no markdown fences.`
+
+const quickPromptSchema = `
+JSON schema:
+{
+  "verdict": "pass" | "warn" | "block",
+  "summary": "one short sentence",
+  "issues": [` + issueSchema + `
+  ]
+}
+` + verdictRules + `
+
+Be brief. One sentence per message. Skip suggestions unless the fix is non-obvious.`
+
+// --- Normal tier ---
+// Standard review. Explain findings, suggest fixes.
+
+const normalPromptHeader = `You are a strict code reviewer. Enforce every rule below.
+Return ONLY valid JSON matching the schema below - no prose, no markdown fences.`
+
+const normalPromptSchema = `
+JSON schema:
+{
+  "verdict": "pass" | "warn" | "block",
+  "summary": "one concise sentence",
+  "issues": [` + issueSchema + `
+  ]
+}
+` + verdictRules + `
+
+Report each distinct finding once. If the same problem spans multiple files, pick the most actionable location and note the scope in the message.`
+
+// --- Deep tier ---
+// Thorough review. The model is told to think harder: check edge cases,
+// reason about interactions, consider what could go wrong. More findings,
+// more explanation, confidence ratings.
+
+const deepPromptHeader = `You are a thorough senior code reviewer performing a careful audit. Enforce every rule below.
+Return ONLY valid JSON matching the schema below - no prose, no markdown fences.
+
+Think carefully about each change. Look for:
+- Edge cases, off-by-one errors, nil/zero-value pitfalls
+- Interactions and ordering dependencies between changed files
+- Missing error handling, resource leaks, deferred cleanup
+- Concurrency issues: races, missing locks, shared state
+- Whether the change is tested and whether existing tests still hold
+- Structural problems: wrong abstraction level, misplaced responsibility`
+
+const deepPromptSchema = `
 JSON schema:
 {
   "verdict": "pass" | "warn" | "block",
@@ -18,7 +89,6 @@ JSON schema:
   "issues": [
     {
       "severity": "error" | "warning" | "info",
-      "category": "style" | "security" | "performance" | "correctness" | "readability" | "maintainability" | "dependency" | "testing",
       "file": "path/to/file.go",
       "line": 42,
       "end_line": 45,
@@ -28,17 +98,12 @@ JSON schema:
       "confidence": "high" | "medium" | "low"
     }
   ],
-  "stats": { "errors": 0, "warnings": 0, "infos": 0 },
   "highlights": ["positive things worth noting"],
   "tech_debt": "overall debt assessment or empty string"
 }
+` + verdictRules + `
 
-Verdict rules:
-- "block": any error-severity issue, security vulnerability, or fundamentally broken logic
-- "warn": warnings present but no blockers
-- "pass": clean or only informational notes
-
-Report each distinct finding once. If the same problem spans multiple files, pick the most actionable location and note the scope in the message.`
+Report each distinct finding once. Include low-confidence findings if they warrant investigation. If the same problem spans multiple files, pick the most actionable location and note the scope in the message.`
 
 // reDiffFile matches file paths from unified diff headers: "+++ b/path/to/file"
 var reDiffFile = regexp.MustCompile(`(?m)^\+\+\+ b/(.+)$`)
@@ -78,20 +143,38 @@ func ruleApplies(globs []string, always bool, files []string) bool {
 	return false
 }
 
-// BuildSystemPrompt constructs the system prompt from a list of rule strings.
-func BuildSystemPrompt(rules []string) string {
+// buildPrompt assembles header + rules + schema into a system prompt.
+func buildPrompt(header string, rules []string, schema string) string {
 	var sb strings.Builder
-	sb.WriteString(systemPromptHeader)
+	sb.WriteString(header)
 
 	if len(rules) > 0 {
 		sb.WriteString("\n\nRules to enforce:\n")
 		for _, r := range rules {
-			fmt.Fprintf(&sb, "- %s\n", r)
+			sb.WriteString("- ")
+			sb.WriteString(r)
+			sb.WriteString("\n")
 		}
 	}
 
-	sb.WriteString(systemPromptSchema)
+	sb.WriteString(schema)
 	return sb.String()
+}
+
+// BuildQuickSystemPrompt builds a minimal prompt for the quick tier.
+// Enforces all rules but only reports bugs and security issues.
+func BuildQuickSystemPrompt(rules []string) string {
+	return buildPrompt(quickPromptHeader, rules, quickPromptSchema)
+}
+
+// BuildSystemPrompt builds the standard prompt for the normal tier.
+func BuildSystemPrompt(rules []string) string {
+	return buildPrompt(normalPromptHeader, rules, normalPromptSchema)
+}
+
+// BuildDeepSystemPrompt builds a thorough prompt for the deep tier.
+func BuildDeepSystemPrompt(rules []string) string {
+	return buildPrompt(deepPromptHeader, rules, deepPromptSchema)
 }
 
 // RuleFilter carries the glob and always metadata for a single rule.
