@@ -76,8 +76,14 @@ type Result struct {
 	LatencyMs int64  `json:"-"`
 }
 
-// reThinkBlock matches Qwen3/DeepSeek chain-of-thought blocks.
-var reThinkBlock = regexp.MustCompile(`(?s)<think>.*?</think>`)
+// reThinkBlock matches chain-of-thought blocks from various reasoning models:
+// Qwen3/DeepSeek use <think>...</think>, Phi-4 Reasoning uses <|thinking|>...<|/thinking|>,
+// others use <thinking>...</thinking> or <reasoning>...</reasoning>.
+var reThinkBlock = regexp.MustCompile(`(?s)<(?:think|thinking|reasoning|\|thinking\|)>.*?</(?:think|thinking|reasoning|\|thinking\|)>`)
+
+// reUnclosedThink strips a trailing unclosed think block when a reasoning model
+// runs out of tokens mid-thought. Only applied if no JSON is found otherwise.
+var reUnclosedThink = regexp.MustCompile(`(?s)<(?:think|thinking|reasoning|\|thinking\|)>.*`)
 
 // Parse extracts a Result from raw LLM output. It handles:
 //   - Qwen3/DeepSeek <think>...</think> reasoning blocks
@@ -115,7 +121,12 @@ func Parse(raw string) (*Result, error) {
 		// forward from each { to find the one that yields a balanced object.
 		match := extractFirstJSONObject(raw)
 		if match == "" {
-			return nil, fmt.Errorf("no JSON found in LLM response: %s", truncate(raw, 200))
+			// Last-ditch: strip any unclosed reasoning block and try once more.
+			retry := strings.TrimSpace(reUnclosedThink.ReplaceAllString(raw, ""))
+			match = extractFirstJSONObject(retry)
+			if match == "" {
+				return nil, fmt.Errorf("no JSON found in LLM response: %s", truncate(raw, 200))
+			}
 		}
 		if err2 := json.Unmarshal([]byte(match), &result); err2 != nil {
 			return nil, fmt.Errorf("parse LLM JSON: %w\nraw: %s", err2, truncate(raw, 200))

@@ -32,6 +32,7 @@ Never run `go build` or `go test` directly. Always use `make`.
 ## MCP tools
 
 The MCP server (`lm-review mcp`) is a stdio process started by Claude Code. It must:
+
 - Start cleanly with no side effects
 - Return friendly text (not errors) when git repo or daemon is unavailable
 - Auto-detect git root via `git rev-parse --show-toplevel`
