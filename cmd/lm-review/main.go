@@ -11,16 +11,15 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"goodkind.io/gklog"
 	"goodkind.io/lm-review/api/reviewpb"
 	"goodkind.io/lm-review/internal/daemon"
-	"goodkind.io/lm-review/internal/gitutil"
 	"goodkind.io/lm-review/internal/github"
+	"goodkind.io/lm-review/internal/gitutil"
 	"goodkind.io/lm-review/internal/mcpserver"
 	"goodkind.io/lm-review/internal/version"
 	"goodkind.io/lm-review/internal/xdg"
 )
-
-var log = slog.Default()
 
 func init() {
 	w := io.Writer(os.Stderr)
@@ -35,7 +34,13 @@ func init() {
 		slog.String("buildHash", version.BuildHash()),
 		slog.String("dirty", version.Dirty),
 	})))
-	log = slog.Default()
+}
+
+func lmReviewLog(ctx context.Context) *slog.Logger {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return gklog.LoggerFromContext(ctx).With("component", "lm-review", "subcomponent", "cli")
 }
 
 func main() {
@@ -68,7 +73,7 @@ func newDiffCmd() *cobra.Command {
 			}
 			repoRoot, err := gitutil.Root("")
 			if err != nil {
-				log.Info("skipping review: not in a git repo")
+				lmReviewLog(cmd.Context()).InfoContext(cmd.Context(), "skipping review: not in a git repo")
 				return nil
 			}
 			diff, err := gitutil.StagedDiff(repoRoot)
@@ -138,7 +143,7 @@ func newRepoCmd() *cobra.Command {
 
 			client, err := daemon.Connect(cmd.Context())
 			if err != nil {
-				log.Info("skipping review: daemon unavailable", "err", err)
+				lmReviewLog(cmd.Context()).InfoContext(cmd.Context(), "skipping review: daemon unavailable", "err", err)
 				return nil
 			}
 			defer client.Close()
@@ -150,7 +155,7 @@ func newRepoCmd() *cobra.Command {
 
 			printResult(resp)
 			if postErr := github.UpsertComment("repo", formatMarkdown("repo", resp)); postErr != nil {
-				log.Info("could not post PR comment", "err", postErr)
+				lmReviewLog(cmd.Context()).InfoContext(cmd.Context(), "could not post PR comment", "err", postErr)
 			}
 			return nil
 		},
@@ -184,11 +189,10 @@ func newMCPCmd() *cobra.Command {
 	}
 }
 
-
 func runReview(ctx context.Context, scope, diff, repoPath string, depth string, model string) error {
 	client, err := daemon.Connect(ctx)
 	if err != nil {
-		log.Info("skipping review: daemon unavailable", "err", err)
+		lmReviewLog(ctx).InfoContext(ctx, "skipping review: daemon unavailable", "err", err)
 		return nil
 	}
 	defer client.Close()
@@ -207,7 +211,7 @@ func runReview(ctx context.Context, scope, diff, repoPath string, depth string, 
 	printResult(resp)
 
 	if postErr := github.UpsertComment(scope, formatMarkdown(scope, resp)); postErr != nil {
-		log.Info("could not post PR comment", "err", postErr)
+		lmReviewLog(ctx).InfoContext(ctx, "could not post PR comment", "err", postErr)
 	}
 
 	if resp.Verdict == "block" {
@@ -253,6 +257,7 @@ func runRepoAsync() error {
 		return fmt.Errorf("start async repo review: %w", err)
 	}
 	go func() { _ = cmd.Wait() }()
-	log.Info("deep repo review running in background")
+	bg := context.Background()
+	lmReviewLog(bg).InfoContext(bg, "deep repo review running in background")
 	return nil
 }

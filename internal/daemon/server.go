@@ -7,13 +7,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"log/slog"
 	"net"
 	"os"
 	"time"
 
 	"google.golang.org/grpc"
 
+	"goodkind.io/gklog"
 	"goodkind.io/lmctl"
 
 	"goodkind.io/lm-review/api/reviewpb"
@@ -109,7 +109,8 @@ func (s *Server) buildClient(ctx context.Context, scope string, depth string, mo
 	// If a higher-priority model is already warm, use it instead.
 	if modelOverride == "" && len(s.cfg.LMStudio.ModelPriority) > 0 && len(loaded) > 0 {
 		if sub := s.cfg.LMStudio.PreferLoaded(model, loadedNames); sub != model {
-			slog.Info("using warm higher-priority model",
+			log := gklog.LoggerFromContext(ctx).With("component", "lm-review", "subcomponent", "daemon")
+			log.InfoContext(ctx, "using warm higher-priority model",
 				"requested", model, "using", sub, "depth", depth)
 			model = sub
 		}
@@ -123,7 +124,8 @@ func (s *Server) buildClient(ctx context.Context, scope string, depth string, mo
 			}
 		}
 		// Requested model isn't loaded. Return nil client; caller handles the skip.
-		slog.Warn("model not loaded and eviction disabled, skipping review",
+		log := gklog.LoggerFromContext(ctx).With("component", "lm-review", "subcomponent", "daemon")
+		log.WarnContext(ctx, "model not loaded and eviction disabled, skipping review",
 			"model", model, "depth", depth)
 		return nil, model
 	}

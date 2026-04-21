@@ -3,11 +3,11 @@ package review
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"sort"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
+	"goodkind.io/gklog"
 )
 
 // ChunkedRepoReview reviews a large codebase by splitting it into chunks,
@@ -48,7 +48,8 @@ func ChunkedRepoReview(ctx context.Context, client ChatClient, files string, sco
 
 			result, parseErr := Parse(raw)
 			if parseErr != nil {
-				slog.Warn("skipping unparseable chunk", "chunk", i+1, "total", len(chunks), "err", parseErr)
+				log := gklog.LoggerFromContext(gctx).With("component", "lm-review", "subcomponent", "chunked_review")
+				log.WarnContext(gctx, "skipping unparseable chunk", "chunk", i+1, "total", len(chunks), "err", parseErr)
 				return nil
 			}
 
