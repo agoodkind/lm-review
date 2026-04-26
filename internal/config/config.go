@@ -14,10 +14,37 @@ import (
 
 // Config is the top-level configuration.
 type Config struct {
-	Provider string   `toml:"provider,omitempty"` // "lmstudio" (default) or "claude"
-	LMStudio LMStudio `toml:"lmstudio"`
-	Claude   Claude   `toml:"claude"`
-	Rules    []Rule   `toml:"rules"`
+	Provider     string       `toml:"provider,omitempty"` // "openai_compat" (default) or "claude"
+	OpenAICompat OpenAICompat `toml:"openai_compat"`
+	Claude       Claude       `toml:"claude"`
+	StaticReview StaticReview `toml:"static_review"`
+	Rules        []Rule       `toml:"rules"`
+}
+
+// StaticReview configures the deterministic static-analysis pipeline that backs
+// the review_static MCP tool.
+type StaticReview struct {
+	Enabled         *bool    `toml:"enabled,omitempty"`
+	DisabledSources []string `toml:"disabled_sources,omitempty"`
+	EnabledChecks   []string `toml:"enabled_checks,omitempty"`
+	Synthesize      *bool    `toml:"synthesize,omitempty"`
+}
+
+// IsEnabled reports whether the static review pipeline is enabled.
+func (s StaticReview) IsEnabled() bool {
+	if s.Enabled == nil {
+		return true
+	}
+	return *s.Enabled
+}
+
+// SynthesizeByDefault reports whether review_static should use the LLM when
+// the caller does not choose a mode explicitly.
+func (s StaticReview) SynthesizeByDefault() bool {
+	if s.Synthesize == nil {
+		return true
+	}
+	return *s.Synthesize
 }
 
 // Claude holds settings for the claude CLI provider.
@@ -30,7 +57,7 @@ func (c Config) ResolveProvider() string {
 	if c.Provider != "" {
 		return c.Provider
 	}
-	return "lmstudio"
+	return "openai_compat"
 }
 
 // ModeModels holds per-mode model overrides.
@@ -42,19 +69,19 @@ type ModeModels struct {
 	UltraModel string `toml:"ultra_model,omitempty"`
 }
 
-// LMStudio holds connection and model settings.
-// Works with any OpenAI-compatible endpoint: LM Studio, ollama, OpenAI, etc.
-type LMStudio struct {
-	URL           string `toml:"url"`
-	Token         string `toml:"token"`
-	QuickModel    string `toml:"quick_model"`
-	FastModel     string `toml:"fast_model"`
-	DeepModel     string `toml:"deep_model"`
-	UltraModel    string `toml:"ultra_model"`
-	ContextLength     int `toml:"context_length,omitempty"`      // tokens; passed to lms load -c (default 32768)
-	MaxResponseTokens int `toml:"max_response_tokens,omitempty"` // max response tokens per request (default 8192)
-	ChunkParallelism  int `toml:"chunk_parallelism,omitempty"`   // parallel chunk reviews for large repos (default 1)
-	MaxMemoryGB       int `toml:"max_memory_gb,omitempty"`       // max GB of models to keep loaded (default: 75% of system RAM)
+// OpenAICompat holds connection and model settings.
+// Works with any OpenAI-compatible endpoint: lmd, LM Studio, ollama, OpenAI, etc.
+type OpenAICompat struct {
+	URL               string `toml:"url"`
+	Token             string `toml:"token"`
+	QuickModel        string `toml:"quick_model"`
+	FastModel         string `toml:"fast_model"`
+	DeepModel         string `toml:"deep_model"`
+	UltraModel        string `toml:"ultra_model"`
+	ContextLength     int    `toml:"context_length,omitempty"`      // tokens; passed to lms load -c (default 32768)
+	MaxResponseTokens int    `toml:"max_response_tokens,omitempty"` // max response tokens per request (default 8192)
+	ChunkParallelism  int    `toml:"chunk_parallelism,omitempty"`   // parallel chunk reviews for large repos (default 1)
+	MaxMemoryGB       int    `toml:"max_memory_gb,omitempty"`       // max GB of models to keep loaded (default: 75% of system RAM)
 
 	// ModelPriority is an ordered list of models from weakest to strongest.
 	// When a tier requests a model and a higher-priority model is already
@@ -75,7 +102,7 @@ type LMStudio struct {
 }
 
 // ResolveContextLength returns the configured context length or the default.
-func (l LMStudio) ResolveContextLength() int {
+func (l OpenAICompat) ResolveContextLength() int {
 	if l.ContextLength > 0 {
 		return l.ContextLength
 	}
@@ -83,7 +110,7 @@ func (l LMStudio) ResolveContextLength() int {
 }
 
 // ResolveMaxResponseTokens returns the configured max response tokens or the default.
-func (l LMStudio) ResolveMaxResponseTokens() int {
+func (l OpenAICompat) ResolveMaxResponseTokens() int {
 	if l.MaxResponseTokens > 0 {
 		return l.MaxResponseTokens
 	}
@@ -91,7 +118,7 @@ func (l LMStudio) ResolveMaxResponseTokens() int {
 }
 
 // ResolveChunkParallelism returns the configured chunk parallelism or the default.
-func (l LMStudio) ResolveChunkParallelism() int {
+func (l OpenAICompat) ResolveChunkParallelism() int {
 	if l.ChunkParallelism > 0 {
 		return l.ChunkParallelism
 	}
@@ -99,7 +126,7 @@ func (l LMStudio) ResolveChunkParallelism() int {
 }
 
 // ResolveMaxMemoryBytes returns the max bytes of model memory to keep loaded.
-func (l LMStudio) ResolveMaxMemoryBytes() int64 {
+func (l OpenAICompat) ResolveMaxMemoryBytes() int64 {
 	if l.MaxMemoryGB > 0 {
 		return int64(l.MaxMemoryGB) * 1024 * 1024 * 1024
 	}
@@ -109,7 +136,7 @@ func (l LMStudio) ResolveMaxMemoryBytes() int64 {
 // ResolveRepoMaxBytes returns the max bytes of source to send for a repo review.
 // Derived from context_length: ~75% of context budget (in chars, ~4 chars/token)
 // minus room for system prompt and response.
-func (l LMStudio) ResolveRepoMaxBytes() int {
+func (l OpenAICompat) ResolveRepoMaxBytes() int {
 	ctx := l.ResolveContextLength()
 	// Reserve 25% for system prompt + response tokens.
 	// ~4 chars per token for code.
@@ -119,7 +146,7 @@ func (l LMStudio) ResolveRepoMaxBytes() int {
 // ResolveModel returns the model to use for a given scope and depth.
 // Depth values: "quick", "normal" (or ""), "deep", "ultra".
 // Resolution: per-mode config → global tier model → fallback to next lower tier.
-func (l LMStudio) ResolveModel(scope string, depth string) string {
+func (l OpenAICompat) ResolveModel(scope string, depth string) string {
 	var mode ModeModels
 	switch scope {
 	case "diff":
@@ -162,7 +189,7 @@ func (l LMStudio) ResolveModel(scope string, depth string) string {
 
 // CanEvict returns whether lm-review is allowed to load/unload models.
 // Defaults to true if not configured.
-func (l LMStudio) CanEvict() bool {
+func (l OpenAICompat) CanEvict() bool {
 	if l.AllowEviction == nil {
 		return true
 	}
@@ -173,7 +200,7 @@ func (l LMStudio) CanEvict() bool {
 // requested model, based on model_priority. Returns the substitute model name
 // if a higher-priority model is loaded, or the original model if not.
 // loadedModels should come from lmctl.ListLoaded().
-func (l LMStudio) PreferLoaded(requested string, loadedModels []string) string {
+func (l OpenAICompat) PreferLoaded(requested string, loadedModels []string) string {
 	if len(l.ModelPriority) == 0 {
 		return requested
 	}
@@ -197,7 +224,7 @@ func (l LMStudio) PreferLoaded(requested string, loadedModels []string) string {
 
 // modelRank returns the index of a model in ModelPriority, matching on base
 // name (strips publisher prefix). Returns -1 if not found.
-func (l LMStudio) modelRank(model string) int {
+func (l OpenAICompat) modelRank(model string) int {
 	base := baseModelName(model)
 	for i, m := range l.ModelPriority {
 		if baseModelName(m) == base {
@@ -235,13 +262,33 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("no config found at %s\n\nRun: lm-review init", path)
 	}
 
-	var cfg Config
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	var raw struct {
+		Provider     string       `toml:"provider,omitempty"`
+		OpenAICompat OpenAICompat `toml:"openai_compat"`
+		LMStudio     OpenAICompat `toml:"lmstudio"`
+		Claude       Claude       `toml:"claude"`
+		StaticReview StaticReview `toml:"static_review"`
+		Rules        []Rule       `toml:"rules"`
+	}
+	if _, err := toml.DecodeFile(path, &raw); err != nil {
 		return nil, fmt.Errorf("decode config %s: %w", path, err)
 	}
 
-	if cfg.LMStudio.URL == "" {
-		cfg.LMStudio.URL = "http://localhost:1234"
+	cfg := Config{
+		Provider:     raw.Provider,
+		OpenAICompat: raw.OpenAICompat,
+		Claude:       raw.Claude,
+		StaticReview: raw.StaticReview,
+		Rules:        raw.Rules,
+	}
+	if cfg.OpenAICompat.URL == "" {
+		cfg.OpenAICompat = raw.LMStudio
+	}
+	if cfg.OpenAICompat.URL == "" {
+		cfg.OpenAICompat.URL = "http://localhost:5400"
+	}
+	if cfg.Provider == "lmstudio" {
+		cfg.Provider = "openai_compat"
 	}
 
 	return &cfg, nil

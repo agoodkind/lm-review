@@ -68,6 +68,11 @@ func (c *Client) ReviewRepo(ctx context.Context, files, repoPath string, depth s
 	return c.rpc.ReviewRepo(ctx, &reviewpb.ReviewRequest{Diff: files, Path: repoPath, Depth: depth, Model: model})
 }
 
+// ReviewStatic sends a static review request to the daemon.
+func (c *Client) ReviewStatic(ctx context.Context, req *reviewpb.StaticReviewRequest) (*reviewpb.ReviewResponse, error) {
+	return c.rpc.ReviewStatic(ctx, req)
+}
+
 func startDaemon() error {
 	self, err := os.Executable()
 	if err != nil {

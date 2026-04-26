@@ -72,3 +72,21 @@ func (r *Reviewer) ReviewRepo(ctx context.Context, files string) (*Result, error
 	result.Model = r.client.ModelID()
 	return result, nil
 }
+
+// ReviewStatic synthesizes deterministic analyzer findings into a normal
+// review result using the existing JSON response schema.
+func (r *Reviewer) ReviewStatic(ctx context.Context, files string, analyzerSection string) (*Result, error) {
+	raw, err := r.client.Chat(ctx, r.systemPrompt, StaticPrompt(files, analyzerSection))
+	if err != nil {
+		return nil, fmt.Errorf("chat: %w", err)
+	}
+
+	result, err := Parse(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	result.Scope = r.scope
+	result.Model = r.client.ModelID()
+	return result, nil
+}

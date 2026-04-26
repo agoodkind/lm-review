@@ -8,6 +8,7 @@ service LMReviewD {
   rpc ReviewDiff(ReviewRequest) returns (ReviewResponse);
   rpc ReviewPR(ReviewRequest) returns (ReviewResponse);
   rpc ReviewRepo(ReviewRequest) returns (ReviewResponse);
+  rpc ReviewStatic(StaticReviewRequest) returns (ReviewResponse);
 }
 
 message ReviewRequest {
@@ -24,6 +25,16 @@ message ReviewResponse {
   string model    = 3;
   int64  latency_ms = 4;
   repeated Issue issues = 5;
+}
+
+message StaticReviewRequest {
+  string path = 1; // absolute path to repo root
+  repeated string files = 2; // optional relative file set
+  repeated string disabled_sources = 3; // vet | staticcheck | custom | semgrep
+  repeated string enabled_checks = 4; // exact check allowlist
+  bool synthesize = 5; // false = raw findings only
+  string depth = 6; // quick | normal | deep | ultra (only for synthesize mode)
+  string model = 7; // optional model override (only for synthesize mode)
 }
 
 message Issue {

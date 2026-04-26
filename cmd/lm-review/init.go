@@ -34,7 +34,7 @@ func newInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Detect backend, select models, write config",
-		Long: `Probes localhost for a running LLM (LM Studio at :1234, ollama at :11434),
+		Long: `Probes localhost for a running LLM (lmd at :5400, LM Studio at :1234, ollama at :11434),
 selects fast and deep models automatically, and writes config.toml.
 
 If the endpoint requires authentication, pass --token.
@@ -51,7 +51,7 @@ Use --json for machine-readable output (useful when called by an agent).`,
 
 			if !force {
 				if _, err := os.Stat(configPath); err == nil {
-					fmt.Fprintf(os.Stderr, "config already exists at %s\nUse --force to overwrite, or edit directly.\n", configPath)
+					cmd.PrintErrf("config already exists at %s\nUse --force to overwrite, or edit directly.\n", configPath)
 					return nil
 				}
 			}
@@ -99,10 +99,10 @@ Use --json for machine-readable output (useful when called by an agent).`,
 				return enc.Encode(result)
 			}
 
-			fmt.Printf("config written: %s\n", configPath)
-			fmt.Printf("backend:    %s (%s)\n", result.Backend, result.URL)
-			fmt.Printf("fast model: %s\n", result.FastModel)
-			fmt.Printf("deep model: %s\n", result.DeepModel)
+			cmd.Printf("config written: %s\n", configPath)
+			cmd.Printf("backend:    %s (%s)\n", result.Backend, result.URL)
+			cmd.Printf("fast model: %s\n", result.FastModel)
+			cmd.Printf("deep model: %s\n", result.DeepModel)
 			return nil
 		},
 	}
@@ -118,7 +118,7 @@ func writeConfig(path, url, token, fastModel, deepModel string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	content := fmt.Sprintf(`[lmstudio]
+	content := fmt.Sprintf(`[openai_compat]
 url        = %q
 token      = %q
 fast_model = %q

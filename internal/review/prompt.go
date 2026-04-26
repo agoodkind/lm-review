@@ -105,6 +105,36 @@ JSON schema:
 
 Report each distinct finding once. Include low-confidence findings if they warrant investigation. If the same problem spans multiple files, pick the most actionable location and note the scope in the message.`
 
+const staticPromptHeader = `You are a strict code reviewer working from deterministic static-analysis evidence.
+Return ONLY valid JSON matching the schema below - no prose, no markdown fences.
+
+You will receive pre-computed analyzer findings from go vet, staticcheck, custom analyzers, and optional semgrep.
+Use them as evidence, not as unquestionable truth. Confirm strong findings, reject weak ones contradicted by code context, deduplicate overlaps, and add at most a few extra issues only when the code strongly supports them.`
+
+const staticPromptSchema = `
+JSON schema:
+{
+  "verdict": "pass" | "warn" | "block",
+  "summary": "one concise sentence",
+  "issues": [
+    {
+      "severity": "error" | "warning" | "info",
+      "file": "path/to/file.go",
+      "line": 42,
+      "end_line": 45,
+      "rule": "short-rule-name",
+      "message": "what is wrong and why",
+      "suggestion": "concrete fix",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "highlights": ["positive things worth noting"],
+  "tech_debt": "overall debt assessment or empty string"
+}
+` + verdictRules + `
+
+Treat analyzer findings as the default candidate set. Reject findings only when the code context clearly does not support them.`
+
 // reDiffFile matches file paths from unified diff headers: "+++ b/path/to/file"
 var reDiffFile = regexp.MustCompile(`(?m)^\+\+\+ b/(.+)$`)
 
@@ -177,6 +207,11 @@ func BuildDeepSystemPrompt(rules []string) string {
 	return buildPrompt(deepPromptHeader, rules, deepPromptSchema)
 }
 
+// BuildStaticSystemPrompt builds the prompt used for synthesized static review.
+func BuildStaticSystemPrompt(rules []string) string {
+	return buildPrompt(staticPromptHeader, rules, staticPromptSchema)
+}
+
 // RuleFilter carries the glob and always metadata for a single rule.
 type RuleFilter struct {
 	Globs  []string
@@ -215,4 +250,17 @@ func ChunkPrompt(files string, chunkNum, totalChunks int) string {
 			"note cross-chunk concerns in tech_debt:\n\n%s",
 		chunkNum, totalChunks, files,
 	)
+}
+
+// StaticPrompt builds the user message for synthesized static review.
+func StaticPrompt(files string, analyzerSection string) string {
+	var sb strings.Builder
+	sb.WriteString("Review this codebase using the static-analysis findings below. Prioritize real issues and collapse overlaps.\n\n")
+	if analyzerSection != "" {
+		sb.WriteString(analyzerSection)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("CODE:\n\n")
+	sb.WriteString(files)
+	return sb.String()
 }

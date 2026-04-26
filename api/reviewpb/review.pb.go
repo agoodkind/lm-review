@@ -173,6 +173,98 @@ func (x *ReviewResponse) GetIssues() []*Issue {
 	return nil
 }
 
+type StaticReviewRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Path            string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`                                              // absolute path to repo root
+	Files           []string               `protobuf:"bytes,2,rep,name=files,proto3" json:"files,omitempty"`                                            // optional relative file set
+	DisabledSources []string               `protobuf:"bytes,3,rep,name=disabled_sources,json=disabledSources,proto3" json:"disabled_sources,omitempty"` // vet | staticcheck | custom | semgrep
+	EnabledChecks   []string               `protobuf:"bytes,4,rep,name=enabled_checks,json=enabledChecks,proto3" json:"enabled_checks,omitempty"`       // exact check allowlist
+	Synthesize      bool                   `protobuf:"varint,5,opt,name=synthesize,proto3" json:"synthesize,omitempty"`                                 // false = raw findings only
+	Depth           string                 `protobuf:"bytes,6,opt,name=depth,proto3" json:"depth,omitempty"`                                            // quick | normal | deep | ultra (only for synthesize mode)
+	Model           string                 `protobuf:"bytes,7,opt,name=model,proto3" json:"model,omitempty"`                                            // optional model override (only for synthesize mode)
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *StaticReviewRequest) Reset() {
+	*x = StaticReviewRequest{}
+	mi := &file_review_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StaticReviewRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StaticReviewRequest) ProtoMessage() {}
+
+func (x *StaticReviewRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_review_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StaticReviewRequest.ProtoReflect.Descriptor instead.
+func (*StaticReviewRequest) Descriptor() ([]byte, []int) {
+	return file_review_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *StaticReviewRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *StaticReviewRequest) GetFiles() []string {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
+func (x *StaticReviewRequest) GetDisabledSources() []string {
+	if x != nil {
+		return x.DisabledSources
+	}
+	return nil
+}
+
+func (x *StaticReviewRequest) GetEnabledChecks() []string {
+	if x != nil {
+		return x.EnabledChecks
+	}
+	return nil
+}
+
+func (x *StaticReviewRequest) GetSynthesize() bool {
+	if x != nil {
+		return x.Synthesize
+	}
+	return false
+}
+
+func (x *StaticReviewRequest) GetDepth() string {
+	if x != nil {
+		return x.Depth
+	}
+	return ""
+}
+
+func (x *StaticReviewRequest) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
 type Issue struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Severity      string                 `protobuf:"bytes,1,opt,name=severity,proto3" json:"severity,omitempty"` // error | warning | info
@@ -190,7 +282,7 @@ type Issue struct {
 
 func (x *Issue) Reset() {
 	*x = Issue{}
-	mi := &file_review_proto_msgTypes[2]
+	mi := &file_review_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -202,7 +294,7 @@ func (x *Issue) String() string {
 func (*Issue) ProtoMessage() {}
 
 func (x *Issue) ProtoReflect() protoreflect.Message {
-	mi := &file_review_proto_msgTypes[2]
+	mi := &file_review_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -215,7 +307,7 @@ func (x *Issue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Issue.ProtoReflect.Descriptor instead.
 func (*Issue) Descriptor() ([]byte, []int) {
-	return file_review_proto_rawDescGZIP(), []int{2}
+	return file_review_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Issue) GetSeverity() string {
@@ -298,7 +390,17 @@ const file_review_proto_rawDesc = "" +
 	"\x05model\x18\x03 \x01(\tR\x05model\x12\x1d\n" +
 	"\n" +
 	"latency_ms\x18\x04 \x01(\x03R\tlatencyMs\x12'\n" +
-	"\x06issues\x18\x05 \x03(\v2\x0f.lmreview.IssueR\x06issues\"\xf0\x01\n" +
+	"\x06issues\x18\x05 \x03(\v2\x0f.lmreview.IssueR\x06issues\"\xdd\x01\n" +
+	"\x13StaticReviewRequest\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x14\n" +
+	"\x05files\x18\x02 \x03(\tR\x05files\x12)\n" +
+	"\x10disabled_sources\x18\x03 \x03(\tR\x0fdisabledSources\x12%\n" +
+	"\x0eenabled_checks\x18\x04 \x03(\tR\renabledChecks\x12\x1e\n" +
+	"\n" +
+	"synthesize\x18\x05 \x01(\bR\n" +
+	"synthesize\x12\x14\n" +
+	"\x05depth\x18\x06 \x01(\tR\x05depth\x12\x14\n" +
+	"\x05model\x18\a \x01(\tR\x05model\"\xf0\x01\n" +
 	"\x05Issue\x12\x1a\n" +
 	"\bseverity\x18\x01 \x01(\tR\bseverity\x12\x12\n" +
 	"\x04file\x18\x02 \x01(\tR\x04file\x12\x12\n" +
@@ -312,13 +414,14 @@ const file_review_proto_rawDesc = "" +
 	"suggestion\x12\x1e\n" +
 	"\n" +
 	"confidence\x18\t \x01(\tR\n" +
-	"confidence2\xcc\x01\n" +
+	"confidence2\x95\x02\n" +
 	"\tLMReviewD\x12?\n" +
 	"\n" +
 	"ReviewDiff\x12\x17.lmreview.ReviewRequest\x1a\x18.lmreview.ReviewResponse\x12=\n" +
 	"\bReviewPR\x12\x17.lmreview.ReviewRequest\x1a\x18.lmreview.ReviewResponse\x12?\n" +
 	"\n" +
-	"ReviewRepo\x12\x17.lmreview.ReviewRequest\x1a\x18.lmreview.ReviewResponseB$Z\"goodkind.io/lm-review/api/reviewpbb\x06proto3"
+	"ReviewRepo\x12\x17.lmreview.ReviewRequest\x1a\x18.lmreview.ReviewResponse\x12G\n" +
+	"\fReviewStatic\x12\x1d.lmreview.StaticReviewRequest\x1a\x18.lmreview.ReviewResponseB$Z\"goodkind.io/lm-review/api/reviewpbb\x06proto3"
 
 var (
 	file_review_proto_rawDescOnce sync.Once
@@ -332,22 +435,25 @@ func file_review_proto_rawDescGZIP() []byte {
 	return file_review_proto_rawDescData
 }
 
-var file_review_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_review_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_review_proto_goTypes = []any{
-	(*ReviewRequest)(nil),  // 0: lmreview.ReviewRequest
-	(*ReviewResponse)(nil), // 1: lmreview.ReviewResponse
-	(*Issue)(nil),          // 2: lmreview.Issue
+	(*ReviewRequest)(nil),       // 0: lmreview.ReviewRequest
+	(*ReviewResponse)(nil),      // 1: lmreview.ReviewResponse
+	(*StaticReviewRequest)(nil), // 2: lmreview.StaticReviewRequest
+	(*Issue)(nil),               // 3: lmreview.Issue
 }
 var file_review_proto_depIdxs = []int32{
-	2, // 0: lmreview.ReviewResponse.issues:type_name -> lmreview.Issue
+	3, // 0: lmreview.ReviewResponse.issues:type_name -> lmreview.Issue
 	0, // 1: lmreview.LMReviewD.ReviewDiff:input_type -> lmreview.ReviewRequest
 	0, // 2: lmreview.LMReviewD.ReviewPR:input_type -> lmreview.ReviewRequest
 	0, // 3: lmreview.LMReviewD.ReviewRepo:input_type -> lmreview.ReviewRequest
-	1, // 4: lmreview.LMReviewD.ReviewDiff:output_type -> lmreview.ReviewResponse
-	1, // 5: lmreview.LMReviewD.ReviewPR:output_type -> lmreview.ReviewResponse
-	1, // 6: lmreview.LMReviewD.ReviewRepo:output_type -> lmreview.ReviewResponse
-	4, // [4:7] is the sub-list for method output_type
-	1, // [1:4] is the sub-list for method input_type
+	2, // 4: lmreview.LMReviewD.ReviewStatic:input_type -> lmreview.StaticReviewRequest
+	1, // 5: lmreview.LMReviewD.ReviewDiff:output_type -> lmreview.ReviewResponse
+	1, // 6: lmreview.LMReviewD.ReviewPR:output_type -> lmreview.ReviewResponse
+	1, // 7: lmreview.LMReviewD.ReviewRepo:output_type -> lmreview.ReviewResponse
+	1, // 8: lmreview.LMReviewD.ReviewStatic:output_type -> lmreview.ReviewResponse
+	5, // [5:9] is the sub-list for method output_type
+	1, // [1:5] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
 	1, // [1:1] is the sub-list for extension extendee
 	0, // [0:1] is the sub-list for field type_name
@@ -364,7 +470,7 @@ func file_review_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_review_proto_rawDesc), len(file_review_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

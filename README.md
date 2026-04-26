@@ -1,6 +1,6 @@
 # lm-review
 
-Local LLM code review using LM Studio. Runs on `make build`, posts results as living PR comments, and exposes tools to Claude Code via MCP.
+Local LLM code review using an OpenAI-compatible local backend, defaulting to `lmd`. Runs on `make build`, posts results as living PR comments, and exposes tools to Claude Code via MCP.
 
 ## Architecture
 
@@ -8,16 +8,16 @@ Local LLM code review using LM Studio. Runs on `make build`, posts results as li
 make build / git commit
        │
        ▼
-lm-review CLI ──gRPC──► lm-review daemon ──HTTP──► LM Studio (localhost:1234)
+lm-review CLI ──gRPC──► lm-review daemon ──HTTP──► lmd (localhost:5400)
                               │
 Claude Code ──MCP────────────┘
 ```
 
-The daemon serializes all LM Studio calls, manages model lifecycle headlessly via `lms` CLI, and writes a structured audit trail to `~/.local/state/lm-review/audit.jsonl`.
+The daemon serializes all backend calls and writes a structured audit trail to `~/.local/state/lm-review/audit.jsonl`.
 
 ## Prerequisites
 
-- [LM Studio](https://lmstudio.ai) installed (models loaded via `lms` CLI - no GUI needed)
+- [`lmd`](https://github.com/agoodkind/lmd) running on `http://localhost:5400`, or another OpenAI-compatible backend
 - Go 1.26+
 - `gh` CLI (for PR comment posting)
 - `protoc` + `protoc-gen-go` + `protoc-gen-go-grpc` (for proto regeneration only)
@@ -39,14 +39,14 @@ make deploy
 Create `~/.config/lm-review/config.toml`:
 
 ```toml
-[lmstudio]
-url        = "http://localhost:1234"
+[openai_compat]
+url        = "http://localhost:5400"
 token      = "sk-lm-your-token-here"
 fast_model = "qwen3-coder-30b-a3b-instruct-dwq-lr9e8"
 deep_model = "qwen3.5-122b-a10b-text-qx85-mlx"
 ```
 
-Get your token from LM Studio Developer tab. The daemon starts LM Studio headlessly and loads models automatically.
+Use the token and model IDs exposed by your chosen backend. The default local target is `lmd` on `http://localhost:5400`.
 
 ## Commands
 

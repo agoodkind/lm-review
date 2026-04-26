@@ -8,10 +8,12 @@ require (
 	github.com/openai/openai-go/v3 v3.31.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sync v0.20.0
+	golang.org/x/tools v0.40.0
 	goodkind.io/gklog v0.0.0-20260421042800-8d0cf3e6c2c8
 	goodkind.io/lmctl v0.0.0
 	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
+	honnef.co/go/tools v0.6.1
 )
 
 replace goodkind.io/lmctl => ../lmctl
@@ -28,9 +30,12 @@ require (
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
+	golang.org/x/exp/typeparams v0.0.0-20231108232855-2478ac86f678 // indirect
+	golang.org/x/mod v0.31.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
+	golang.org/x/tools/go/expect v0.1.1-deprecated // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 )

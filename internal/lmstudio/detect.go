@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -22,29 +23,40 @@ type Backend struct {
 // Detect probes known local endpoints and returns the first reachable one.
 // Pass token if the endpoint requires authentication.
 func Detect(ctx context.Context, token string) (*Backend, error) {
+	slog.Debug("lmstudio.detect.begin")
 	candidates := []struct {
 		name  string
 		url   string
 		token string
 	}{
+		{"lmd", "http://localhost:5400", token},
 		{"LM Studio", "http://localhost:1234", token},
 		{"ollama", "http://localhost:11434", "ollama"},
 	}
 
+	var detected *Backend
 	for _, c := range candidates {
 		models, err := ListModels(ctx, c.url, c.token)
 		if err == nil {
-			return &Backend{Name: c.name, URL: c.url, Token: c.token, Models: models}, nil
+			detected = &Backend{Name: c.name, URL: c.url, Token: c.token, Models: models}
+			break
 		}
 	}
+	if detected != nil {
+		slog.Info("lmstudio.detect.completed", "backend", detected.Name, "url", detected.URL, "model_count", len(detected.Models))
+		return detected, nil
+	}
 
-	return nil, fmt.Errorf("no LLM backend found at localhost:1234 or localhost:11434")
+	slog.Warn("lmstudio.detect.failed")
+	return nil, fmt.Errorf("no LLM backend found at localhost:5400, localhost:1234, or localhost:11434")
 }
 
 // ListModels returns available model IDs from an OpenAI-compatible endpoint.
 func ListModels(ctx context.Context, baseURL, token string) ([]string, error) {
+	slog.Debug("lmstudio.list_models.begin", "base_url", baseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/v1/models", nil)
 	if err != nil {
+		slog.Warn("lmstudio.list_models.request_failed", "base_url", baseURL, "err", err)
 		return nil, err
 	}
 	if token != "" {
@@ -54,14 +66,17 @@ func ListModels(ctx context.Context, baseURL, token string) ([]string, error) {
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
+		slog.Warn("lmstudio.list_models.http_failed", "base_url", baseURL, "err", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized {
+		slog.Warn("lmstudio.list_models.unauthorized", "base_url", baseURL)
 		return nil, fmt.Errorf("authentication required - pass --token")
 	}
 	if resp.StatusCode != http.StatusOK {
+		slog.Warn("lmstudio.list_models.bad_status", "base_url", baseURL, "status", resp.StatusCode)
 		return nil, fmt.Errorf("status %d", resp.StatusCode)
 	}
 
@@ -71,6 +86,7 @@ func ListModels(ctx context.Context, baseURL, token string) ([]string, error) {
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		slog.Warn("lmstudio.list_models.decode_failed", "base_url", baseURL, "err", err)
 		return nil, err
 	}
 
@@ -80,6 +96,7 @@ func ListModels(ctx context.Context, baseURL, token string) ([]string, error) {
 			ids = append(ids, m.ID)
 		}
 	}
+	slog.Debug("lmstudio.list_models.completed", "base_url", baseURL, "model_count", len(ids))
 	return ids, nil
 }
 

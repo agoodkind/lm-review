@@ -11,12 +11,23 @@ Guidance for AI agents working in this repository.
 3. **Review logic** (`internal/review/`) - prompt construction, JSON parsing, result formatting.
 4. **LM Studio client** (`internal/lmstudio/`) - HTTP API calls and `lms` CLI management.
 
+## Key packages
+
+- `internal/review/` - `Result`, `Parse()`, `Reviewer`, and chunked reviews. This is the core review type system.
+- `internal/lmstudio/` - HTTP client plus `lms` CLI lifecycle management.
+- `internal/daemon/` - gRPC server, serialized review execution, and audit logging.
+- `internal/mcpserver/` - MCP stdio server using `mark3labs/mcp-go`.
+- `internal/xdg/` - XDG path helpers.
+- `internal/audit/` - JSONL audit log at `~/.local/state/lm-review/audit.jsonl`.
+- `api/review.proto` - gRPC service definition.
+
 ## Build and test
 
 ```bash
 make build    # build binary
 make test     # run tests
 make deploy   # install to $GOPATH/bin
+make check    # full validation suite
 ```
 
 Never run `go build` or `go test` directly. Always use `make`.
@@ -24,10 +35,12 @@ Never run `go build` or `go test` directly. Always use `make`.
 ## Key rules
 
 - All config is TOML. Never JSON for user-facing config.
+- Config lives at `~/.config/lm-review/config.toml`.
 - Use `slog` for logging. Never `fmt.Fprintf(os.Stderr)` for diagnostics.
 - XDG paths only. See `internal/xdg/xdg.go`.
 - The daemon auto-starts on first `daemon.Connect()` call. Tests should kill and clean the socket.
 - `result.go` is the canonical review output type. The proto `ReviewResponse` is only for gRPC transport - convert at the daemon boundary.
+- MCP tool handlers must return friendly text on error, never hard error results.
 
 ## MCP tools
 
@@ -36,6 +49,14 @@ The MCP server (`lm-review mcp`) is a stdio process started by Claude Code. It m
 - Start cleanly with no side effects
 - Return friendly text (not errors) when git repo or daemon is unavailable
 - Auto-detect git root via `git rev-parse --show-toplevel`
+
+## Daemon
+
+The daemon auto-starts on first `daemon.Connect()` call. To restart it after a binary update:
+
+```bash
+pkill -f "lm-review daemon" && rm -f $TMPDIR/lm-review/daemon.sock
+```
 
 ## Proto
 

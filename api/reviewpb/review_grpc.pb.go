@@ -19,9 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	LMReviewD_ReviewDiff_FullMethodName = "/lmreview.LMReviewD/ReviewDiff"
-	LMReviewD_ReviewPR_FullMethodName   = "/lmreview.LMReviewD/ReviewPR"
-	LMReviewD_ReviewRepo_FullMethodName = "/lmreview.LMReviewD/ReviewRepo"
+	LMReviewD_ReviewDiff_FullMethodName   = "/lmreview.LMReviewD/ReviewDiff"
+	LMReviewD_ReviewPR_FullMethodName     = "/lmreview.LMReviewD/ReviewPR"
+	LMReviewD_ReviewRepo_FullMethodName   = "/lmreview.LMReviewD/ReviewRepo"
+	LMReviewD_ReviewStatic_FullMethodName = "/lmreview.LMReviewD/ReviewStatic"
 )
 
 // LMReviewDClient is the client API for LMReviewD service.
@@ -31,6 +32,7 @@ type LMReviewDClient interface {
 	ReviewDiff(ctx context.Context, in *ReviewRequest, opts ...grpc.CallOption) (*ReviewResponse, error)
 	ReviewPR(ctx context.Context, in *ReviewRequest, opts ...grpc.CallOption) (*ReviewResponse, error)
 	ReviewRepo(ctx context.Context, in *ReviewRequest, opts ...grpc.CallOption) (*ReviewResponse, error)
+	ReviewStatic(ctx context.Context, in *StaticReviewRequest, opts ...grpc.CallOption) (*ReviewResponse, error)
 }
 
 type lMReviewDClient struct {
@@ -71,6 +73,16 @@ func (c *lMReviewDClient) ReviewRepo(ctx context.Context, in *ReviewRequest, opt
 	return out, nil
 }
 
+func (c *lMReviewDClient) ReviewStatic(ctx context.Context, in *StaticReviewRequest, opts ...grpc.CallOption) (*ReviewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReviewResponse)
+	err := c.cc.Invoke(ctx, LMReviewD_ReviewStatic_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LMReviewDServer is the server API for LMReviewD service.
 // All implementations must embed UnimplementedLMReviewDServer
 // for forward compatibility.
@@ -78,6 +90,7 @@ type LMReviewDServer interface {
 	ReviewDiff(context.Context, *ReviewRequest) (*ReviewResponse, error)
 	ReviewPR(context.Context, *ReviewRequest) (*ReviewResponse, error)
 	ReviewRepo(context.Context, *ReviewRequest) (*ReviewResponse, error)
+	ReviewStatic(context.Context, *StaticReviewRequest) (*ReviewResponse, error)
 	mustEmbedUnimplementedLMReviewDServer()
 }
 
@@ -96,6 +109,9 @@ func (UnimplementedLMReviewDServer) ReviewPR(context.Context, *ReviewRequest) (*
 }
 func (UnimplementedLMReviewDServer) ReviewRepo(context.Context, *ReviewRequest) (*ReviewResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReviewRepo not implemented")
+}
+func (UnimplementedLMReviewDServer) ReviewStatic(context.Context, *StaticReviewRequest) (*ReviewResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReviewStatic not implemented")
 }
 func (UnimplementedLMReviewDServer) mustEmbedUnimplementedLMReviewDServer() {}
 func (UnimplementedLMReviewDServer) testEmbeddedByValue()                   {}
@@ -172,6 +188,24 @@ func _LMReviewD_ReviewRepo_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LMReviewD_ReviewStatic_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StaticReviewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LMReviewDServer).ReviewStatic(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LMReviewD_ReviewStatic_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LMReviewDServer).ReviewStatic(ctx, req.(*StaticReviewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LMReviewD_ServiceDesc is the grpc.ServiceDesc for LMReviewD service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -190,6 +224,10 @@ var LMReviewD_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReviewRepo",
 			Handler:    _LMReviewD_ReviewRepo_Handler,
+		},
+		{
+			MethodName: "ReviewStatic",
+			Handler:    _LMReviewD_ReviewStatic_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

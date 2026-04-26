@@ -1,23 +1,23 @@
 # lm-review configuration example.
 # Copy to ~/.config/lm-review/config.toml and adjust to your setup.
-# Run `lm-review init` to auto-detect backend and models.
+# Run `lm-review init` to auto-detect a local backend and models.
 
-[lmstudio]
-url        = "http://localhost:1234"  # LM Studio, ollama (:11434), or OpenAI
+[openai_compat]
+url        = "http://localhost:5400"  # lmd by default, or another OpenAI-compatible backend
 token      = ""                        # API token
 fast_model = ""                        # Global fallback fast model
 deep_model = ""                        # Global fallback deep model
 
 # Per-mode model overrides. Falls back to fast_model/deep_model if not set.
-[lmstudio.diff]
+[openai_compat.diff]
 model      = ""   # model for `lm-review diff`
 deep_model = ""   # model for `lm-review diff --deep`
 
-[lmstudio.pr]
+[openai_compat.pr]
 model      = ""   # model for `lm-review pr`
 deep_model = ""   # model for `lm-review pr --deep`
 
-[lmstudio.repo]
+[openai_compat.repo]
 model      = ""   # model for `lm-review repo` (typically a stronger model)
 deep_model = ""   # model for `lm-review repo --deep` (largest available)
 

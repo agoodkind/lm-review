@@ -3,7 +3,7 @@ package review
 
 import "context"
 
-// ChatClient abstracts an LLM provider. Both lmstudio and claude implementations
+// ChatClient abstracts an LLM provider. Both the OpenAI-compatible backend and claude implementations
 // satisfy this interface.
 type ChatClient interface {
 	// Chat sends a system prompt and user message, returning the raw response text.
