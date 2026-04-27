@@ -25,7 +25,7 @@ func init() {
 	w := io.Writer(os.Stderr)
 	logPath := xdg.DaemonLogPath()
 	_ = os.MkdirAll(filepath.Dir(logPath), 0o700)
-	if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600); err == nil {
+	if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
 		w = io.MultiWriter(os.Stderr, f)
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(w, nil).WithAttrs([]slog.Attr{

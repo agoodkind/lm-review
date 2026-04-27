@@ -15,7 +15,7 @@ import (
 // Entry is one line in the audit log.
 type Entry struct {
 	Timestamp  time.Time `json:"ts"`
-	Scope      string    `json:"scope"`            // diff | pr | repo
+	Scope      string    `json:"scope"` // diff | pr | repo
 	Model      string    `json:"model"`
 	DiffHash   string    `json:"diff_hash,omitempty"`
 	LatencyMS  int64     `json:"latency_ms"`

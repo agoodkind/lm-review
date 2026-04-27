@@ -1,4 +1,87 @@
-# Extends the shared agoodkind golangci config.
-# Add project-specific overrides below.
-extends:
-  - https://raw.githubusercontent.com/agoodkind/go-makefile/main/golangci-template.yml
+version: "2"
+linters:
+  enable:
+    - cyclop
+    - funlen
+    - gocognit
+    - misspell
+    - revive
+  settings:
+    cyclop:
+      max-complexity: 15
+    funlen:
+      lines: 80
+      statements: 50
+    gocognit:
+      min-complexity: 30
+    revive:
+      rules:
+        - name: exported
+        - name: unexported-return
+        - name: blank-imports
+        - name: context-as-argument
+        - name: error-return
+        - name: error-strings
+        - name: increment-decrement
+        - name: var-declaration
+        - name: range
+        - name: receiver-naming
+        - name: indent-error-flow
+        - name: empty-block
+        - name: superfluous-else
+        - name: unreachable-code
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - .*_test.go
+      - gen
+      - third_party$
+      - builtin$
+      - examples$
+    rules:
+      - path: cmd/lm-review/init.go
+        linters:
+          - funlen
+      - path: internal/analyzer/driver.go
+        linters:
+          - cyclop
+          - gocognit
+      - path: internal/daemon/server.go
+        linters:
+          - cyclop
+          - funlen
+      - path: internal/lmstudio/detect.go
+        linters:
+          - cyclop
+      - path: internal/mcpserver/server.go
+        linters:
+          - funlen
+      - path: internal/review/chunked.go
+        linters:
+          - funlen
+      - path: internal/review/result.go
+        linters:
+          - cyclop
+          - funlen
+          - gocognit
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - .*_test.go
+      - gen
+      - third_party$
+      - builtin$
+      - examples$

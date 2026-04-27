@@ -100,8 +100,10 @@ func ListModels(ctx context.Context, baseURL, token string) ([]string, error) {
 	return ids, nil
 }
 
-var reParamCount = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)b`)
-var reActiveParams = regexp.MustCompile(`(?i)-a(\d+(?:\.\d+)?)b`)
+var (
+	reParamCount   = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)b`)
+	reActiveParams = regexp.MustCompile(`(?i)-a(\d+(?:\.\d+)?)b`)
+)
 
 // SelectModels picks the best fast and deep models from a list.
 // Fast: smallest effective size, coder-named preferred.

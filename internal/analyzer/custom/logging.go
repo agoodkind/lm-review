@@ -8,10 +8,12 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-const slogErrorWithoutErrName = "slog_error_without_err"
-const bannedDirectOutputName = "banned_direct_output"
-const hotLoopInfoLogName = "hot_loop_info_log"
-const missingBoundaryLogName = "missing_boundary_log"
+const (
+	slogErrorWithoutErrName = "slog_error_without_err"
+	bannedDirectOutputName  = "banned_direct_output"
+	hotLoopInfoLogName      = "hot_loop_info_log"
+	missingBoundaryLogName  = "missing_boundary_log"
+)
 
 var SlogErrorWithoutErrAnalyzer = &analysis.Analyzer{
 	Name: slogErrorWithoutErrName,

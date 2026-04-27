@@ -22,14 +22,14 @@ const (
 type Category string
 
 const (
-	CategoryStyle          Category = "style"
-	CategorySecurity       Category = "security"
-	CategoryPerformance    Category = "performance"
-	CategoryCorrectness    Category = "correctness"
-	CategoryReadability    Category = "readability"
+	CategoryStyle           Category = "style"
+	CategorySecurity        Category = "security"
+	CategoryPerformance     Category = "performance"
+	CategoryCorrectness     Category = "correctness"
+	CategoryReadability     Category = "readability"
 	CategoryMaintainability Category = "maintainability"
-	CategoryDependency     Category = "dependency"
-	CategoryTesting        Category = "testing"
+	CategoryDependency      Category = "dependency"
+	CategoryTesting         Category = "testing"
 )
 
 // Confidence is the LLM's self-assessed confidence in a finding.
@@ -43,8 +43,8 @@ const (
 
 // Issue is a single finding from the review.
 type Issue struct {
-	Severity   string     `json:"severity"`             // error | warning | info
-	Category   Category   `json:"category,omitempty"`   // style | security | performance | ...
+	Severity   string     `json:"severity"`           // error | warning | info
+	Category   Category   `json:"category,omitempty"` // style | security | performance | ...
 	File       string     `json:"file"`
 	Line       int        `json:"line"`
 	EndLine    int        `json:"end_line,omitempty"`
@@ -414,8 +414,8 @@ func (r *Result) SARIF() (string, error) {
 		}
 
 		sr := sarifResult{
-			RuleID: issue.Rule,
-			Level:  levelMap[issue.Severity],
+			RuleID:    issue.Rule,
+			Level:     levelMap[issue.Severity],
 			Locations: []sarifLocation{loc},
 		}
 		sr.Message.Text = issue.Message
@@ -490,9 +490,10 @@ func extractFirstJSONObject(s string) string {
 			if inString {
 				continue
 			}
-			if ch == '{' {
+			switch ch {
+			case '{':
 				depth++
-			} else if ch == '}' {
+			case '}':
 				depth--
 				if depth == 0 {
 					return s[i : j+1]

@@ -26,6 +26,8 @@ func BuildHash() string {
 	}
 	defer f.Close()
 	h := sha256.New()
-	io.Copy(h, f)
+	if _, err := io.Copy(h, f); err != nil {
+		return "unknown"
+	}
 	return hex.EncodeToString(h.Sum(nil))[:12]
 }
