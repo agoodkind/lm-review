@@ -5,40 +5,62 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
 // Verdict is the overall outcome of a review.
 type Verdict string
 
+// Verdict values returned by reviews. Closed set; new values must be
+// added here and to every switch consumer.
 const (
-	VerdictPass  Verdict = "pass"
-	VerdictWarn  Verdict = "warn"
+	// VerdictPass means the review found no actionable issues.
+	VerdictPass Verdict = "pass"
+	// VerdictWarn means warnings were found but none block.
+	VerdictWarn Verdict = "warn"
+	// VerdictBlock means at least one error-severity finding requires
+	// the change to be revisited before merging.
 	VerdictBlock Verdict = "block"
-	VerdictSkip  Verdict = "skip" // nothing to review
+	// VerdictSkip means there was nothing to review (empty diff,
+	// disabled provider, etc.).
+	VerdictSkip Verdict = "skip"
 )
 
 // Category groups issues by concern type.
 type Category string
 
+// Category values used for issue grouping. Closed set.
 const (
-	CategoryStyle           Category = "style"
-	CategorySecurity        Category = "security"
-	CategoryPerformance     Category = "performance"
-	CategoryCorrectness     Category = "correctness"
-	CategoryReadability     Category = "readability"
+	// CategoryStyle covers formatting and stylistic issues.
+	CategoryStyle Category = "style"
+	// CategorySecurity covers vulnerabilities and unsafe patterns.
+	CategorySecurity Category = "security"
+	// CategoryPerformance covers slow or wasteful code.
+	CategoryPerformance Category = "performance"
+	// CategoryCorrectness covers bugs and incorrect behaviour.
+	CategoryCorrectness Category = "correctness"
+	// CategoryReadability covers clarity and naming concerns.
+	CategoryReadability Category = "readability"
+	// CategoryMaintainability covers structure and long-term health.
 	CategoryMaintainability Category = "maintainability"
-	CategoryDependency      Category = "dependency"
-	CategoryTesting         Category = "testing"
+	// CategoryDependency covers third-party usage concerns.
+	CategoryDependency Category = "dependency"
+	// CategoryTesting covers missing or weak tests.
+	CategoryTesting Category = "testing"
 )
 
 // Confidence is the LLM's self-assessed confidence in a finding.
 type Confidence string
 
+// Confidence values reported by the LLM. Closed set.
 const (
-	ConfidenceHigh   Confidence = "high"
+	// ConfidenceHigh signals strong evidence backs the finding.
+	ConfidenceHigh Confidence = "high"
+	// ConfidenceMedium signals plausible but not certain evidence.
 	ConfidenceMedium Confidence = "medium"
-	ConfidenceLow    Confidence = "low"
+	// ConfidenceLow signals a speculative or weakly-supported finding.
+	ConfidenceLow Confidence = "low"
 )
 
 // Issue is a single finding from the review.
@@ -76,13 +98,15 @@ type Result struct {
 	LatencyMs int64  `json:"-"`
 }
 
-// reThinkBlock matches chain-of-thought blocks from various reasoning models:
-// Qwen3/DeepSeek use <think>...</think>, Phi-4 Reasoning uses <|thinking|>...<|/thinking|>,
-// others use <thinking>...</thinking> or <reasoning>...</reasoning>.
+// reThinkBlock matches chain-of-thought blocks from reasoning models:
+// Qwen3 and DeepSeek use <think>...</think>, Phi-4 Reasoning uses
+// <|thinking|>...<|/thinking|>, others use <thinking>...</thinking>
+// or <reasoning>...</reasoning>.
 var reThinkBlock = regexp.MustCompile(`(?s)<(?:think|thinking|reasoning|\|thinking\|)>.*?</(?:think|thinking|reasoning|\|thinking\|)>`)
 
-// reUnclosedThink strips a trailing unclosed think block when a reasoning model
-// runs out of tokens mid-thought. Only applied if no JSON is found otherwise.
+// reUnclosedThink strips a trailing unclosed think block when a
+// reasoning model runs out of tokens mid-thought. Only applied if no
+// JSON is found otherwise.
 var reUnclosedThink = regexp.MustCompile(`(?s)<(?:think|thinking|reasoning|\|thinking\|)>.*`)
 
 // Parse extracts a Result from raw LLM output. It handles:
@@ -139,9 +163,10 @@ func Parse(raw string) (*Result, error) {
 	return &result, nil
 }
 
-// recalcStats recomputes Stats from Issues in case the LLM omitted or miscounted them.
+// recalcStats recomputes Stats from Issues in case the LLM omitted
+// or miscounted them.
 func (r *Result) recalcStats() {
-	r.Stats = Stats{}
+	r.Stats = Stats{Errors: 0, Warnings: 0, Infos: 0}
 	for _, issue := range r.Issues {
 		switch issue.Severity {
 		case "error":
@@ -154,7 +179,8 @@ func (r *Result) recalcStats() {
 	}
 }
 
-// inferVerdict sets Verdict from issue counts if the LLM left it empty or inconsistent.
+// inferVerdict sets Verdict from issue counts if the LLM left it
+// empty or inconsistent.
 func (r *Result) inferVerdict() {
 	if r.Verdict == "" {
 		switch {
@@ -181,174 +207,233 @@ func (r *Result) ExitCode(errorThreshold ...int) int {
 	return 0
 }
 
+// ANSI escape codes used by [Result.Text].
+const (
+	ansiReset = "\033[0m"
+	ansiBold  = "\033[1m"
+	ansiDim   = "\033[2m"
+)
+
+// verdictAnsiColor returns the ANSI color escape for a verdict.
+func verdictAnsiColor(v Verdict) string {
+	switch v {
+	case VerdictPass:
+		return "\033[32m"
+	case VerdictWarn:
+		return "\033[33m"
+	case VerdictBlock:
+		return "\033[31m"
+	case VerdictSkip:
+		return ""
+	}
+	return ""
+}
+
+// verdictIcon returns the emoji used to head a rendered verdict.
+func verdictIcon(v Verdict) string {
+	switch v {
+	case VerdictPass:
+		return "✅"
+	case VerdictWarn:
+		return "⚠️"
+	case VerdictBlock:
+		return "🚫"
+	case VerdictSkip:
+		return "⏭️"
+	}
+	return ""
+}
+
+// severityAnsiColor returns the ANSI color escape for a severity.
+func severityAnsiColor(severity string) string {
+	switch severity {
+	case "error":
+		return "\033[31m"
+	case "warning":
+		return "\033[33m"
+	case "info":
+		return "\033[36m"
+	}
+	return ""
+}
+
+// severityIcon returns a single-character icon for a severity.
+func severityIcon(severity string) string {
+	switch severity {
+	case "error":
+		return "✗"
+	case "warning":
+		return "⚠"
+	case "info":
+		return "·"
+	}
+	return ""
+}
+
+// formatLineRef formats a line range for display.
+func formatLineRef(line, endLine int) string {
+	if endLine > line {
+		return fmt.Sprintf("%d-%d", line, endLine)
+	}
+	return strconv.Itoa(line)
+}
+
+// groupByFile groups issues by file path while preserving the order in
+// which files first appear in r.Issues.
+func (r *Result) groupByFile() (map[string][]Issue, []string) {
+	byFile := make(map[string][]Issue)
+	order := []string{}
+	for _, issue := range r.Issues {
+		if _, seen := byFile[issue.File]; !seen {
+			order = append(order, issue.File)
+		}
+		byFile[issue.File] = append(byFile[issue.File], issue)
+	}
+	return byFile, order
+}
+
+// writeTextIssues writes the per-file issue list using ANSI styling.
+func (r *Result) writeTextIssues(b *strings.Builder) {
+	if len(r.Issues) == 0 {
+		return
+	}
+	byFile, order := r.groupByFile()
+	b.WriteString("\n")
+	for _, file := range order {
+		fmt.Fprintf(b, "  %s%s%s\n", ansiBold, file, ansiReset)
+		for _, issue := range byFile[file] {
+			fmt.Fprintf(b, "    %s%s%s %s[%s:%s]%s %s\n",
+				severityAnsiColor(issue.Severity), severityIcon(issue.Severity), ansiReset,
+				ansiDim, issue.Rule, formatLineRef(issue.Line, issue.EndLine), ansiReset,
+				issue.Message)
+			if issue.Suggestion != "" {
+				fmt.Fprintf(b, "      %s-> %s%s\n", ansiDim, issue.Suggestion, ansiReset)
+			}
+		}
+		b.WriteString("\n")
+	}
+}
+
 // Text renders the result for terminal output with ANSI colors.
 func (r *Result) Text() string {
 	var b strings.Builder
 
-	verdictColor := map[Verdict]string{
-		VerdictPass:  "\033[32m", // green
-		VerdictWarn:  "\033[33m", // yellow
-		VerdictBlock: "\033[31m", // red
-	}
-	reset := "\033[0m"
-	bold := "\033[1m"
-	dim := "\033[2m"
-
-	icon := map[Verdict]string{
-		VerdictPass:  "✅",
-		VerdictWarn:  "⚠️",
-		VerdictBlock: "🚫",
-	}[r.Verdict]
-
-	color := verdictColor[r.Verdict]
-
 	fmt.Fprintf(&b, "\n%s%s lm-review [%s] %s%s %s%s\n",
-		bold, color, r.Model,
-		icon, strings.ToUpper(string(r.Verdict)),
-		r.Summary, reset)
+		ansiBold, verdictAnsiColor(r.Verdict), r.Model,
+		verdictIcon(r.Verdict), strings.ToUpper(string(r.Verdict)),
+		r.Summary, ansiReset)
 
 	if r.Stats.Errors+r.Stats.Warnings+r.Stats.Infos > 0 {
 		fmt.Fprintf(&b, "%s  %d errors · %d warnings · %d infos%s\n",
-			dim, r.Stats.Errors, r.Stats.Warnings, r.Stats.Infos, reset)
+			ansiDim, r.Stats.Errors, r.Stats.Warnings, r.Stats.Infos, ansiReset)
 	}
 
-	if len(r.Issues) > 0 {
-		// Group by file.
-		byFile := make(map[string][]Issue)
-		order := []string{}
-		for _, issue := range r.Issues {
-			if _, seen := byFile[issue.File]; !seen {
-				order = append(order, issue.File)
-			}
-			byFile[issue.File] = append(byFile[issue.File], issue)
-		}
-
-		b.WriteString("\n")
-		for _, file := range order {
-			issues := byFile[file]
-			fmt.Fprintf(&b, "  %s%s%s\n", bold, file, reset)
-			for _, issue := range issues {
-				sevColor := map[string]string{
-					"error":   "\033[31m",
-					"warning": "\033[33m",
-					"info":    "\033[36m",
-				}[issue.Severity]
-				sevIcon := map[string]string{
-					"error": "✗", "warning": "⚠", "info": "·",
-				}[issue.Severity]
-
-				lineRef := fmt.Sprintf("%d", issue.Line)
-				if issue.EndLine > issue.Line {
-					lineRef = fmt.Sprintf("%d-%d", issue.Line, issue.EndLine)
-				}
-
-				fmt.Fprintf(&b, "    %s%s%s %s[%s:%s]%s %s\n",
-					sevColor, sevIcon, reset,
-					dim, issue.Rule, lineRef, reset,
-					issue.Message)
-
-				if issue.Suggestion != "" {
-					fmt.Fprintf(&b, "      %s→ %s%s\n", dim, issue.Suggestion, reset)
-				}
-			}
-			b.WriteString("\n")
-		}
-	}
+	r.writeTextIssues(&b)
 
 	if len(r.Highlights) > 0 {
-		fmt.Fprintf(&b, "  %s👍 Highlights%s\n", bold, reset)
+		fmt.Fprintf(&b, "  %s👍 Highlights%s\n", ansiBold, ansiReset)
 		for _, h := range r.Highlights {
-			fmt.Fprintf(&b, "  %s· %s%s\n", dim, h, reset)
+			fmt.Fprintf(&b, "  %s· %s%s\n", ansiDim, h, ansiReset)
 		}
 		b.WriteString("\n")
 	}
 
 	if r.TechDebt != "" {
-		fmt.Fprintf(&b, "  %s🏗 Tech debt:%s %s\n\n", dim, reset, r.TechDebt)
+		fmt.Fprintf(&b, "  %s🏗 Tech debt:%s %s\n\n", ansiDim, ansiReset, r.TechDebt)
 	}
 
 	return b.String()
+}
+
+// scopeLabelFor returns the human-readable label for a review scope.
+func scopeLabelFor(scope string) string {
+	switch scope {
+	case "diff":
+		return "Fast Review"
+	case "pr":
+		return "PR Review"
+	case "repo":
+		return "Repo Health"
+	}
+	return "Review"
+}
+
+// markdownSeverityLabel returns the emoji-prefixed severity label.
+func markdownSeverityLabel(severity string) string {
+	switch severity {
+	case "error":
+		return "🚫 error"
+	case "warning":
+		return "⚠️ warning"
+	case "info":
+		return "ℹ️ info"
+	}
+	return severity
+}
+
+// sortIssuesBySeverity sorts issues in-place: error > warning > info.
+func sortIssuesBySeverity(issues []Issue) {
+	sevOrd := map[string]int{"error": 0, "warning": 1, "info": 2}
+	sort.Slice(issues, func(i, j int) bool {
+		return sevOrd[issues[i].Severity] < sevOrd[issues[j].Severity]
+	})
+}
+
+// writeMarkdownFile writes the per-file <details> block for Markdown.
+func writeMarkdownFile(b *strings.Builder, file string, issues []Issue) {
+	fmt.Fprintf(b, "<details><summary><code>%s</code> (%d issue", file, len(issues))
+	if len(issues) != 1 {
+		b.WriteString("s")
+	}
+	b.WriteString(")</summary>\n\n")
+	b.WriteString("| Severity | Line | Rule | Message | Suggestion |\n")
+	b.WriteString("|----------|------|------|---------|------------|\n")
+	for _, issue := range issues {
+		suggestion := issue.Suggestion
+		if suggestion == "" {
+			suggestion = "-"
+		}
+		fmt.Fprintf(b, "| %s | %s | `%s` | %s | %s |\n",
+			markdownSeverityLabel(issue.Severity),
+			formatLineRef(issue.Line, issue.EndLine),
+			issue.Rule, issue.Message, suggestion)
+	}
+	b.WriteString("\n</details>\n\n")
+}
+
+// writeMarkdownIssues writes the Issues section to b.
+func (r *Result) writeMarkdownIssues(b *strings.Builder) {
+	if len(r.Issues) == 0 {
+		return
+	}
+	byFile, order := r.groupByFile()
+	for _, issues := range byFile {
+		sortIssuesBySeverity(issues)
+	}
+	fmt.Fprintf(b, "### Issues\n\n")
+	for _, file := range order {
+		writeMarkdownFile(b, file, byFile[file])
+	}
 }
 
 // Markdown renders the result as a GitHub PR comment body.
 func (r *Result) Markdown() string {
 	var b strings.Builder
 
-	icon := map[Verdict]string{
-		VerdictPass:  "✅",
-		VerdictWarn:  "⚠️",
-		VerdictBlock: "🚫",
-	}[r.Verdict]
-
-	scopeLabel := map[string]string{
-		"diff": "Fast Review",
-		"pr":   "PR Review",
-		"repo": "Repo Health",
-	}[r.Scope]
-	if scopeLabel == "" {
-		scopeLabel = "Review"
-	}
-
 	model := r.Model
 	if r.LatencyMs > 0 {
 		model = fmt.Sprintf("%s, %dms", r.Model, r.LatencyMs)
 	}
-
-	fmt.Fprintf(&b, "## 🤖 %s (%s)\n\n", scopeLabel, model)
-	fmt.Fprintf(&b, "**Verdict:** %s %s — %s\n\n", icon, strings.ToUpper(string(r.Verdict)), r.Summary)
+	fmt.Fprintf(&b, "## 🤖 %s (%s)\n\n", scopeLabelFor(r.Scope), model)
+	fmt.Fprintf(&b, "**Verdict:** %s %s. %s\n\n",
+		verdictIcon(r.Verdict), strings.ToUpper(string(r.Verdict)), r.Summary)
 
 	if r.Stats.Errors+r.Stats.Warnings+r.Stats.Infos > 0 {
 		fmt.Fprintf(&b, "> %d errors · %d warnings · %d infos\n\n",
 			r.Stats.Errors, r.Stats.Warnings, r.Stats.Infos)
 	}
 
-	if len(r.Issues) > 0 {
-		// Group by file, sort errors first.
-		byFile := make(map[string][]Issue)
-		order := []string{}
-		for _, issue := range r.Issues {
-			if _, seen := byFile[issue.File]; !seen {
-				order = append(order, issue.File)
-			}
-			byFile[issue.File] = append(byFile[issue.File], issue)
-		}
-
-		// Sort each file's issues: error > warning > info.
-		sevOrd := map[string]int{"error": 0, "warning": 1, "info": 2}
-		for _, issues := range byFile {
-			sort.Slice(issues, func(i, j int) bool {
-				return sevOrd[issues[i].Severity] < sevOrd[issues[j].Severity]
-			})
-		}
-
-		fmt.Fprintf(&b, "### Issues\n\n")
-		for _, file := range order {
-			issues := byFile[file]
-			fmt.Fprintf(&b, "<details><summary><code>%s</code> (%d issue", file, len(issues))
-			if len(issues) != 1 {
-				b.WriteString("s")
-			}
-			b.WriteString(")</summary>\n\n")
-			b.WriteString("| Severity | Line | Rule | Message | Suggestion |\n")
-			b.WriteString("|----------|------|------|---------|------------|\n")
-			for _, issue := range issues {
-				sev := map[string]string{
-					"error": "🚫 error", "warning": "⚠️ warning", "info": "ℹ️ info",
-				}[issue.Severity]
-				lineRef := fmt.Sprintf("%d", issue.Line)
-				if issue.EndLine > issue.Line {
-					lineRef = fmt.Sprintf("%d-%d", issue.Line, issue.EndLine)
-				}
-				suggestion := issue.Suggestion
-				if suggestion == "" {
-					suggestion = "—"
-				}
-				fmt.Fprintf(&b, "| %s | %s | `%s` | %s | %s |\n",
-					sev, lineRef, issue.Rule, issue.Message, suggestion)
-			}
-			b.WriteString("\n</details>\n\n")
-		}
-	}
+	r.writeMarkdownIssues(&b)
 
 	if len(r.Highlights) > 0 {
 		b.WriteString("### 👍 Highlights\n\n")
@@ -366,73 +451,114 @@ func (r *Result) Markdown() string {
 	return b.String()
 }
 
-// SARIF returns a minimal SARIF 2.1.0 JSON string for tooling integration.
+// sarifArtifactLocation is the URI half of a SARIF location.
+type sarifArtifactLocation struct {
+	URI string `json:"uri"`
+}
+
+// sarifRegion describes the line range a SARIF result points to.
+type sarifRegion struct {
+	StartLine int `json:"startLine"`
+	EndLine   int `json:"endLine,omitempty"`
+}
+
+// sarifLocation pairs an artifact (file) with a region (line range).
+type sarifLocation struct {
+	ArtifactLocation sarifArtifactLocation `json:"artifactLocation"`
+	Region           sarifRegion           `json:"region"`
+}
+
+// sarifMessage carries the human-readable description of a result.
+type sarifMessage struct {
+	Text string `json:"text"`
+}
+
+// sarifResult is a single finding in SARIF form.
+type sarifResult struct {
+	RuleID    string          `json:"ruleId"`
+	Level     string          `json:"level"`
+	Message   sarifMessage    `json:"message"`
+	Locations []sarifLocation `json:"locations,omitempty"`
+}
+
+// sarifDriver identifies the tool that produced a SARIF run.
+type sarifDriver struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// sarifTool wraps a driver, matching the SARIF schema.
+type sarifTool struct {
+	Driver sarifDriver `json:"driver"`
+}
+
+// sarifRun is a single tool run within a SARIF document.
+type sarifRun struct {
+	Tool    sarifTool     `json:"tool"`
+	Results []sarifResult `json:"results"`
+}
+
+// sarifDoc is the SARIF 2.1.0 envelope.
+type sarifDoc struct {
+	Version string     `json:"version"`
+	Schema  string     `json:"$schema"`
+	Runs    []sarifRun `json:"runs"`
+}
+
+// sarifLevelFor maps internal severity strings to SARIF level names.
+func sarifLevelFor(severity string) string {
+	switch severity {
+	case "error":
+		return "error"
+	case "warning":
+		return "warning"
+	case "info":
+		return "note"
+	default:
+		return "none"
+	}
+}
+
+// issueToSarifResult builds a SARIF result for a single Issue.
+func issueToSarifResult(issue Issue) sarifResult {
+	region := sarifRegion{StartLine: issue.Line, EndLine: 0}
+	if issue.EndLine > issue.Line {
+		region.EndLine = issue.EndLine
+	}
+	location := sarifLocation{
+		ArtifactLocation: sarifArtifactLocation{URI: issue.File},
+		Region:           region,
+	}
+	text := issue.Message
+	if issue.Suggestion != "" {
+		text += " Suggestion: " + issue.Suggestion
+	}
+	return sarifResult{
+		RuleID:    issue.Rule,
+		Level:     sarifLevelFor(issue.Severity),
+		Message:   sarifMessage{Text: text},
+		Locations: []sarifLocation{location},
+	}
+}
+
+// SARIF returns a minimal SARIF 2.1.0 JSON string for tooling
+// integration.
 func (r *Result) SARIF() (string, error) {
-	type sarifLocation struct {
-		ArtifactLocation struct {
-			URI string `json:"uri"`
-		} `json:"artifactLocation"`
-		Region struct {
-			StartLine int `json:"startLine"`
-			EndLine   int `json:"endLine,omitempty"`
-		} `json:"region"`
-	}
-	type sarifResult struct {
-		RuleID  string `json:"ruleId"`
-		Level   string `json:"level"` // error | warning | note
-		Message struct {
-			Text string `json:"text"`
-		} `json:"message"`
-		Locations []sarifLocation `json:"locations,omitempty"`
-	}
-	type sarifRun struct {
-		Tool struct {
-			Driver struct {
-				Name    string `json:"name"`
-				Version string `json:"version"`
-			} `json:"driver"`
-		} `json:"tool"`
-		Results []sarifResult `json:"results"`
-	}
-	type sarifDoc struct {
-		Version string     `json:"version"`
-		Schema  string     `json:"$schema"`
-		Runs    []sarifRun `json:"runs"`
-	}
-
-	levelMap := map[string]string{
-		"error": "error", "warning": "warning", "info": "note",
-	}
-
-	var results []sarifResult
+	results := make([]sarifResult, 0, len(r.Issues))
 	for _, issue := range r.Issues {
-		loc := sarifLocation{}
-		loc.ArtifactLocation.URI = issue.File
-		loc.Region.StartLine = issue.Line
-		if issue.EndLine > issue.Line {
-			loc.Region.EndLine = issue.EndLine
-		}
-
-		sr := sarifResult{
-			RuleID:    issue.Rule,
-			Level:     levelMap[issue.Severity],
-			Locations: []sarifLocation{loc},
-		}
-		sr.Message.Text = issue.Message
-		if issue.Suggestion != "" {
-			sr.Message.Text += " Suggestion: " + issue.Suggestion
-		}
-		results = append(results, sr)
+		results = append(results, issueToSarifResult(issue))
 	}
-
-	run := sarifRun{Results: results}
-	run.Tool.Driver.Name = "lm-review"
-	run.Tool.Driver.Version = "1.0.0"
 
 	doc := sarifDoc{
 		Version: "2.1.0",
 		Schema:  "https://json.schemastore.org/sarif-2.1.0.json",
-		Runs:    []sarifRun{run},
+		Runs: []sarifRun{{
+			Tool: sarifTool{Driver: sarifDriver{
+				Name:    "lm-review",
+				Version: "1.0.0",
+			}},
+			Results: results,
+		}},
 	}
 
 	out, err := json.MarshalIndent(doc, "", "  ")
@@ -442,7 +568,8 @@ func (r *Result) SARIF() (string, error) {
 	return string(out), nil
 }
 
-// IssuesByCategory returns issues grouped by category, sorted by severity within each group.
+// IssuesByCategory returns issues grouped by category, sorted by
+// severity within each group.
 func (r *Result) IssuesByCategory() map[Category][]Issue {
 	out := make(map[Category][]Issue)
 	sevOrd := map[string]int{"error": 0, "warning": 1, "info": 2}
@@ -461,12 +588,13 @@ func (r *Result) IssuesByCategory() map[Category][]Issue {
 	return out
 }
 
-// extractFirstJSONObject scans s for the first '{' that opens a balanced JSON
-// object and returns that substring. Returns "" if none is found.
-// This avoids the greedy-regex problem where reasoning prose containing bare
-// '{' and '}' characters causes the extractor to return malformed input.
+// extractFirstJSONObject scans s for the first '{' that opens a
+// balanced JSON object and returns that substring. Returns "" if none
+// is found. This avoids the greedy-regex problem where reasoning prose
+// containing bare '{' and '}' characters causes the extractor to
+// return malformed input.
 func extractFirstJSONObject(s string) string {
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] != '{' {
 			continue
 		}

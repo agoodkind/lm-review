@@ -1,20 +1,29 @@
+// Package analyzer runs deterministic static analysis sources (vet,
+// staticcheck, custom analyzers, semgrep) and merges their findings.
 package analyzer
 
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
 
+// Severity is the analyzer-reported severity of a [Finding].
 type Severity string
 
+// Severity values produced by analyzers.
 const (
-	SeverityError   Severity = "error"
+	// SeverityError marks a finding that must block.
+	SeverityError Severity = "error"
+	// SeverityWarning marks a finding that should be reviewed.
 	SeverityWarning Severity = "warning"
-	SeverityInfo    Severity = "info"
+	// SeverityInfo marks an informational finding.
+	SeverityInfo Severity = "info"
 )
 
+// Finding is a single analyzer-emitted issue.
 type Finding struct {
 	Tool      string   `json:"tool"`
 	Check     string   `json:"check"`
@@ -27,27 +36,34 @@ type Finding struct {
 	Fix       string   `json:"fix,omitempty"`
 }
 
+// Source is one analyzer backend (vet, staticcheck, custom, semgrep).
 type Source interface {
+	// Name returns a stable identifier used to filter sources.
 	Name() string
-	Run(context.Context, RunOptions) ([]Finding, error)
+	// Run executes the source and returns its findings.
+	Run(ctx context.Context, opts RunOptions) ([]Finding, error)
 }
 
+// RunOptions configures a single analyzer run.
 type RunOptions struct {
 	RepoRoot      string
 	Files         []string
 	EnabledChecks []string
 }
 
+// Config selects which sources and checks are active for [Run].
 type Config struct {
 	DisabledSources []string
 	EnabledChecks   []string
 }
 
+// Run executes every enabled [Source] against opts and merges the
+// findings, returning per-source errors separately.
 func Run(ctx context.Context, cfg Config, opts RunOptions) ([]Finding, []error) {
 	var all []Finding
 	var errs []error
 	for _, source := range DefaultSources() {
-		if contains(cfg.DisabledSources, source.Name()) {
+		if slices.Contains(cfg.DisabledSources, source.Name()) {
 			continue
 		}
 		sourceOpts := opts
@@ -63,6 +79,8 @@ func Run(ctx context.Context, cfg Config, opts RunOptions) ([]Finding, []error) 
 	return dedupeAndSort(all), errs
 }
 
+// FormatForPrompt renders findings as a Markdown section grouped by
+// tool, suitable for embedding in an LLM prompt.
 func FormatForPrompt(findings []Finding) string {
 	if len(findings) == 0 {
 		return ""
@@ -134,13 +152,4 @@ func dedupeAndSort(findings []Finding) []Finding {
 		return out[i].Check < out[j].Check
 	})
 	return out
-}
-
-func contains(items []string, target string) bool {
-	for _, item := range items {
-		if item == target {
-			return true
-		}
-	}
-	return false
 }

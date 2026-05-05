@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -13,7 +14,7 @@ import (
 	"goodkind.io/lm-review/internal/xdg"
 )
 
-// InitResult is the structured output of lm-review init.
+// InitResult is the structured output of `lm-review init`.
 type InitResult struct {
 	ConfigPath string   `json:"config_path"`
 	Backend    string   `json:"backend"`
@@ -46,64 +47,8 @@ Use --json for machine-readable output (useful when called by an agent).`,
   lm-review init --token sk-lm-abc:xyz
   lm-review init --url https://api.openai.com --token sk-...
   lm-review init --json`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			configPath := xdg.ConfigPath()
-
-			if !force {
-				if _, err := os.Stat(configPath); err == nil {
-					cmd.PrintErrf("config already exists at %s\nUse --force to overwrite, or edit directly.\n", configPath)
-					return nil
-				}
-			}
-
-			ctx := context.Background()
-
-			var backend *lmstudio.Backend
-			var err error
-
-			if url != "" {
-				// Explicit URL - just list models there.
-				models, lerr := lmstudio.ListModels(ctx, url, token)
-				if lerr != nil {
-					return fmt.Errorf("cannot reach %s: %w", url, lerr)
-				}
-				backend = &lmstudio.Backend{Name: "custom", URL: url, Token: token, Models: models}
-			} else {
-				backend, err = lmstudio.Detect(ctx, token)
-				if err != nil {
-					return fmt.Errorf("%w\n\nStart your LLM backend, then re-run.\nOr specify explicitly: lm-review init --url <url> --token <token>", err)
-				}
-			}
-
-			fast, deep := lmstudio.SelectModels(backend.Models)
-			if fast == "" {
-				return fmt.Errorf("no models found at %s - load a model first", backend.URL)
-			}
-
-			if err := writeConfig(configPath, backend.URL, backend.Token, fast, deep); err != nil {
-				return fmt.Errorf("write config: %w", err)
-			}
-
-			result := InitResult{
-				ConfigPath: configPath,
-				Backend:    backend.Name,
-				URL:        backend.URL,
-				FastModel:  fast,
-				DeepModel:  deep,
-				Models:     backend.Models,
-			}
-
-			if jsonOut {
-				enc := json.NewEncoder(os.Stdout)
-				enc.SetIndent("", "  ")
-				return enc.Encode(result)
-			}
-
-			cmd.Printf("config written: %s\n", configPath)
-			cmd.Printf("backend:    %s (%s)\n", result.Backend, result.URL)
-			cmd.Printf("fast model: %s\n", result.FastModel)
-			cmd.Printf("deep model: %s\n", result.DeepModel)
-			return nil
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runInit(cmd, force, jsonOut, token, url)
 		},
 	}
 
@@ -114,9 +59,90 @@ Use --json for machine-readable output (useful when called by an agent).`,
 	return cmd
 }
 
-func writeConfig(path, url, token, fastModel, deepModel string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+// runInit performs the init flow: detect backend, choose models,
+// write config, render output.
+func runInit(cmd *cobra.Command, force, jsonOut bool, token, url string) error {
+	configPath := xdg.ConfigPath()
+
+	if !force {
+		_, statErr := os.Stat(configPath)
+		if statErr == nil {
+			cmd.PrintErrf("config already exists at %s\nUse --force to overwrite, or edit directly.\n", configPath)
+			return nil
+		}
+	}
+
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	backend, err := resolveInitBackend(ctx, url, token)
+	if err != nil {
 		return err
+	}
+
+	fast, deep := lmstudio.SelectModels(backend.Models)
+	if fast == "" {
+		slog.ErrorContext(ctx, "lm-review.init.no_models", "url", backend.URL)
+		return fmt.Errorf("no models found at %s, load a model first", backend.URL)
+	}
+
+	writeErr := writeConfig(configPath, backend.URL, backend.Token, fast, deep)
+	if writeErr != nil {
+		slog.ErrorContext(ctx, "lm-review.init.write_failed", "path", configPath, "err", writeErr)
+		return fmt.Errorf("write config: %w", writeErr)
+	}
+
+	result := InitResult{
+		ConfigPath: configPath,
+		Backend:    backend.Name,
+		URL:        backend.URL,
+		FastModel:  fast,
+		DeepModel:  deep,
+		Models:     backend.Models,
+	}
+
+	if jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		encErr := enc.Encode(result)
+		if encErr != nil {
+			return fmt.Errorf("encode json: %w", encErr)
+		}
+		return nil
+	}
+
+	cmd.Printf("config written: %s\n", configPath)
+	cmd.Printf("backend:    %s (%s)\n", result.Backend, result.URL)
+	cmd.Printf("fast model: %s\n", result.FastModel)
+	cmd.Printf("deep model: %s\n", result.DeepModel)
+	return nil
+}
+
+// resolveInitBackend either lists models at an explicit URL or runs
+// auto-detection across known local endpoints.
+func resolveInitBackend(ctx context.Context, url, token string) (*lmstudio.Backend, error) {
+	if url != "" {
+		models, lerr := lmstudio.ListModels(ctx, url, token)
+		if lerr != nil {
+			slog.ErrorContext(ctx, "lm-review.init.list_models_failed", "url", url, "err", lerr)
+			return nil, fmt.Errorf("cannot reach %s: %w", url, lerr)
+		}
+		return &lmstudio.Backend{Name: "custom", URL: url, Token: token, Models: models}, nil
+	}
+	backend, err := lmstudio.Detect(ctx, token)
+	if err != nil {
+		slog.ErrorContext(ctx, "lm-review.init.detect_failed", "err", err)
+		return nil, fmt.Errorf("%w\n\nStart your LLM backend, then re-run.\nOr specify explicitly: lm-review init --url <url> --token <token>", err)
+	}
+	return backend, nil
+}
+
+func writeConfig(path, url, token, fastModel, deepModel string) error {
+	mkErr := os.MkdirAll(filepath.Dir(path), 0o700)
+	if mkErr != nil {
+		return fmt.Errorf("mkdir config dir: %w", mkErr)
 	}
 	content := fmt.Sprintf(`[openai_compat]
 url        = %q
@@ -124,5 +150,9 @@ token      = %q
 fast_model = %q
 deep_model = %q
 `, url, token, fastModel, deepModel)
-	return os.WriteFile(path, []byte(content), 0o600)
+	writeErr := os.WriteFile(path, []byte(content), 0o600)
+	if writeErr != nil {
+		return fmt.Errorf("write file: %w", writeErr)
+	}
+	return nil
 }

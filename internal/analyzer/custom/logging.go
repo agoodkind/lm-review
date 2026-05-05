@@ -1,3 +1,5 @@
+// Package custom defines the project's custom AST analyzers used by the
+// internal analyzer registry to enforce structured logging conventions.
 package custom
 
 import (
@@ -15,31 +17,56 @@ const (
 	missingBoundaryLogName  = "missing_boundary_log"
 )
 
+// SlogErrorWithoutErrAnalyzer reports [log/slog.Logger.Error] calls
+// that omit an "err" field.
 var SlogErrorWithoutErrAnalyzer = &analysis.Analyzer{
 	Name: slogErrorWithoutErrName,
 	Doc:  "reports slog.Error calls that do not include an err field",
-	Run:  runSlogErrorWithoutErr,
+	Run:  runHandler(runSlogErrorWithoutErr),
 }
 
+// BannedDirectOutputAnalyzer reports direct stdout and stderr printing
+// in production code.
 var BannedDirectOutputAnalyzer = &analysis.Analyzer{
 	Name: bannedDirectOutputName,
 	Doc:  "reports direct stdout and stderr printing in production code",
-	Run:  runBannedDirectOutput,
+	Run:  runHandler(runBannedDirectOutput),
 }
 
+// HotLoopInfoLogAnalyzer reports info-level logging inside loops, which
+// can produce excessive log volume.
 var HotLoopInfoLogAnalyzer = &analysis.Analyzer{
 	Name: hotLoopInfoLogName,
 	Doc:  "reports info-level logging inside loops",
-	Run:  runHotLoopInfoLog,
+	Run:  runHandler(runHotLoopInfoLog),
 }
 
+// MissingBoundaryLogAnalyzer reports exported error-returning functions
+// that appear to perform side effects without emitting a structured
+// boundary log.
 var MissingBoundaryLogAnalyzer = &analysis.Analyzer{
 	Name: missingBoundaryLogName,
 	Doc:  "reports exported functions with error returns that appear to perform side effects without logging",
-	Run:  runMissingBoundaryLog,
+	Run:  runHandler(runMissingBoundaryLog),
 }
 
-func runSlogErrorWithoutErr(pass *analysis.Pass) (any, error) {
+// analyzerResult is the (empty) result type these analyzers produce.
+// The [analysis.Analyzer.Run] signature requires `any`, but at the
+// project boundary we keep a typed shape so call sites never see a
+// bare interface.
+type analyzerResult struct{}
+
+// runHandler adapts a typed analyzer-pass function to the bare-`any`
+// shape that [analysis.Analyzer.Run] requires. Concentrating the cast
+// here keeps `any` out of every analyzer body.
+func runHandler(fn func(*analysis.Pass) (analyzerResult, error)) func(*analysis.Pass) (any, error) {
+	return func(pass *analysis.Pass) (any, error) {
+		res, err := fn(pass)
+		return res, err
+	}
+}
+
+func runSlogErrorWithoutErr(pass *analysis.Pass) (analyzerResult, error) {
 	for _, file := range pass.Files {
 		ast.Inspect(file, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)
@@ -66,10 +93,10 @@ func runSlogErrorWithoutErr(pass *analysis.Pass) (any, error) {
 			return true
 		})
 	}
-	return nil, nil
+	return analyzerResult{}, nil
 }
 
-func runBannedDirectOutput(pass *analysis.Pass) (any, error) {
+func runBannedDirectOutput(pass *analysis.Pass) (analyzerResult, error) {
 	banned := map[string]bool{
 		"fmt.Print":   true,
 		"fmt.Printf":  true,
@@ -102,10 +129,10 @@ func runBannedDirectOutput(pass *analysis.Pass) (any, error) {
 			return true
 		})
 	}
-	return nil, nil
+	return analyzerResult{}, nil
 }
 
-func runHotLoopInfoLog(pass *analysis.Pass) (any, error) {
+func runHotLoopInfoLog(pass *analysis.Pass) (analyzerResult, error) {
 	for _, file := range pass.Files {
 		ast.Inspect(file, func(node ast.Node) bool {
 			switch loop := node.(type) {
@@ -117,10 +144,10 @@ func runHotLoopInfoLog(pass *analysis.Pass) (any, error) {
 			return true
 		})
 	}
-	return nil, nil
+	return analyzerResult{}, nil
 }
 
-func runMissingBoundaryLog(pass *analysis.Pass) (any, error) {
+func runMissingBoundaryLog(pass *analysis.Pass) (analyzerResult, error) {
 	for _, file := range pass.Files {
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
@@ -138,7 +165,7 @@ func runMissingBoundaryLog(pass *analysis.Pass) (any, error) {
 			})
 		}
 	}
-	return nil, nil
+	return analyzerResult{}, nil
 }
 
 func checkLoopForInfoLogs(pass *analysis.Pass, body *ast.BlockStmt) {

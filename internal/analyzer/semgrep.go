@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 )
 
 type semgrepSource struct{}
@@ -31,8 +33,20 @@ type semgrepResult struct {
 
 func (semgrepSource) Name() string { return "semgrep" }
 
+// semgrepInstalled reports whether the semgrep binary is on PATH. The
+// boolean result lets callers short-circuit cleanly without juggling
+// an "absent is not an error" sentinel.
+func semgrepInstalled(ctx context.Context) bool {
+	_, err := exec.LookPath("semgrep")
+	if err != nil {
+		slog.DebugContext(ctx, "semgrep.run.skipped", "reason", "binary not found")
+		return false
+	}
+	return true
+}
+
 func (semgrepSource) Run(ctx context.Context, opts RunOptions) ([]Finding, error) {
-	if _, err := exec.LookPath("semgrep"); err != nil {
+	if !semgrepInstalled(ctx) {
 		return nil, nil
 	}
 	configPath, ok := findSemgrepConfig(opts.RepoRoot)
@@ -46,14 +60,17 @@ func (semgrepSource) Run(ctx context.Context, opts RunOptions) ([]Finding, error
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+			slog.ErrorContext(ctx, "semgrep.run.failed", "err", err, "stderr", string(exitErr.Stderr))
 			return nil, fmt.Errorf("semgrep: %s", string(exitErr.Stderr))
 		}
+		slog.ErrorContext(ctx, "semgrep.run.failed", "err", err)
 		return nil, fmt.Errorf("semgrep: %w", err)
 	}
 
 	var result semgrepResult
-	if err := json.Unmarshal(output, &result); err != nil {
-		return nil, fmt.Errorf("decode semgrep json: %w", err)
+	if jsonErr := json.Unmarshal(output, &result); jsonErr != nil {
+		slog.ErrorContext(ctx, "semgrep.decode_json.failed", "err", jsonErr)
+		return nil, fmt.Errorf("decode semgrep json: %w", jsonErr)
 	}
 
 	allowedFiles := make(map[string]bool, len(opts.Files))
@@ -71,17 +88,19 @@ func (semgrepSource) Run(ctx context.Context, opts RunOptions) ([]Finding, error
 		if len(allowedFiles) > 0 && !allowedFiles[rel] {
 			continue
 		}
-		if len(opts.EnabledChecks) > 0 && !contains(opts.EnabledChecks, item.CheckID) {
+		if len(opts.EnabledChecks) > 0 && !slices.Contains(opts.EnabledChecks, item.CheckID) {
 			continue
 		}
 		findings = append(findings, Finding{
-			Tool:     "semgrep",
-			Check:    item.CheckID,
-			Severity: semgrepSeverity(item.Extra.Severity),
-			File:     rel,
-			Line:     item.Start.Line,
-			EndLine:  item.End.Line,
-			Message:  item.Extra.Message,
+			Tool:      "semgrep",
+			Check:     item.CheckID,
+			Severity:  semgrepSeverity(item.Extra.Severity),
+			File:      rel,
+			Line:      item.Start.Line,
+			EndLine:   item.End.Line,
+			Message:   item.Extra.Message,
+			Principle: "",
+			Fix:       "",
 		})
 	}
 	return findings, nil
