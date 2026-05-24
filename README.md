@@ -53,6 +53,8 @@ Use the token and model IDs exposed by your chosen backend. The default local ta
 ```bash
 lm-review diff            # review staged changes (fast model)
 lm-review diff --deep     # review staged changes (deep model)
+lm-review review          # auto-select staged, worktree, PR, then repo input
+lm-review review --mode worktree
 lm-review pr              # review branch vs main
 lm-review repo            # full repo health review
 lm-review repo --async    # full repo review in background
@@ -89,9 +91,8 @@ Add to `~/.claude.json`:
 Or add `.mcp.json` to your project root (see `.mcp.json` in this repo).
 
 Tools available in Claude Code:
-- `review_diff` - review staged changes
-- `review_pr` - review branch vs main
-- `review_repo` - full repo health review
+- `review` - path-based LLM review with `auto`, `staged`, `worktree`, `pr`, and `repo` modes
+- `review_static` - deterministic static analysis with optional LLM synthesis
 
 ## Review output
 
@@ -106,7 +107,9 @@ Each review returns:
 | `tech_debt` | Overall debt assessment |
 | `stats` | Error/warning/info counts |
 
-Large repos (>80KB) are reviewed in chunks and merged automatically.
+Large inputs are loaded inside the daemon and reviewed in chunks. The MCP
+process sends only the repo path, mode, depth, model, and optional base ref over
+gRPC.
 
 ## Audit log
 

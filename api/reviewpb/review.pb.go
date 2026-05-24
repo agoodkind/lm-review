@@ -21,13 +21,71 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type ReviewMode int32
+
+const (
+	ReviewMode_REVIEW_MODE_UNSPECIFIED   ReviewMode = 0
+	ReviewMode_REVIEW_MODE_AUTO          ReviewMode = 1
+	ReviewMode_REVIEW_MODE_STAGED_DIFF   ReviewMode = 2
+	ReviewMode_REVIEW_MODE_WORKTREE_DIFF ReviewMode = 3
+	ReviewMode_REVIEW_MODE_PR            ReviewMode = 4
+	ReviewMode_REVIEW_MODE_REPO          ReviewMode = 5
+)
+
+// Enum value maps for ReviewMode.
+var (
+	ReviewMode_name = map[int32]string{
+		0: "REVIEW_MODE_UNSPECIFIED",
+		1: "REVIEW_MODE_AUTO",
+		2: "REVIEW_MODE_STAGED_DIFF",
+		3: "REVIEW_MODE_WORKTREE_DIFF",
+		4: "REVIEW_MODE_PR",
+		5: "REVIEW_MODE_REPO",
+	}
+	ReviewMode_value = map[string]int32{
+		"REVIEW_MODE_UNSPECIFIED":   0,
+		"REVIEW_MODE_AUTO":          1,
+		"REVIEW_MODE_STAGED_DIFF":   2,
+		"REVIEW_MODE_WORKTREE_DIFF": 3,
+		"REVIEW_MODE_PR":            4,
+		"REVIEW_MODE_REPO":          5,
+	}
+)
+
+func (x ReviewMode) Enum() *ReviewMode {
+	p := new(ReviewMode)
+	*p = x
+	return p
+}
+
+func (x ReviewMode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ReviewMode) Descriptor() protoreflect.EnumDescriptor {
+	return file_review_proto_enumTypes[0].Descriptor()
+}
+
+func (ReviewMode) Type() protoreflect.EnumType {
+	return &file_review_proto_enumTypes[0]
+}
+
+func (x ReviewMode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ReviewMode.Descriptor instead.
+func (ReviewMode) EnumDescriptor() ([]byte, []int) {
+	return file_review_proto_rawDescGZIP(), []int{0}
+}
+
 type ReviewRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Diff          string                 `protobuf:"bytes,1,opt,name=diff,proto3" json:"diff,omitempty"`
-	Depth         string                 `protobuf:"bytes,2,opt,name=depth,proto3" json:"depth,omitempty"`     // quick | normal | deep | ultra (empty = normal)
-	Context       string                 `protobuf:"bytes,3,opt,name=context,proto3" json:"context,omitempty"` // optional extra context (e.g. PR title)
-	Model         string                 `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`     // override model for this request (empty = use config)
-	Path          string                 `protobuf:"bytes,5,opt,name=path,proto3" json:"path,omitempty"`       // absolute path to repo root for project-local rule loading
+	Mode          ReviewMode             `protobuf:"varint,1,opt,name=mode,proto3,enum=lmreview.ReviewMode" json:"mode,omitempty"`
+	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`                      // absolute path to repo root
+	Depth         string                 `protobuf:"bytes,3,opt,name=depth,proto3" json:"depth,omitempty"`                    // quick | normal | deep | ultra (empty = normal)
+	Model         string                 `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`                    // override model for this request (empty = use config)
+	BaseRef       string                 `protobuf:"bytes,5,opt,name=base_ref,json=baseRef,proto3" json:"base_ref,omitempty"` // optional base ref for PR mode
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -62,9 +120,16 @@ func (*ReviewRequest) Descriptor() ([]byte, []int) {
 	return file_review_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *ReviewRequest) GetDiff() string {
+func (x *ReviewRequest) GetMode() ReviewMode {
 	if x != nil {
-		return x.Diff
+		return x.Mode
+	}
+	return ReviewMode_REVIEW_MODE_UNSPECIFIED
+}
+
+func (x *ReviewRequest) GetPath() string {
+	if x != nil {
+		return x.Path
 	}
 	return ""
 }
@@ -76,13 +141,6 @@ func (x *ReviewRequest) GetDepth() string {
 	return ""
 }
 
-func (x *ReviewRequest) GetContext() string {
-	if x != nil {
-		return x.Context
-	}
-	return ""
-}
-
 func (x *ReviewRequest) GetModel() string {
 	if x != nil {
 		return x.Model
@@ -90,9 +148,9 @@ func (x *ReviewRequest) GetModel() string {
 	return ""
 }
 
-func (x *ReviewRequest) GetPath() string {
+func (x *ReviewRequest) GetBaseRef() string {
 	if x != nil {
-		return x.Path
+		return x.BaseRef
 	}
 	return ""
 }
@@ -377,13 +435,13 @@ var File_review_proto protoreflect.FileDescriptor
 
 const file_review_proto_rawDesc = "" +
 	"\n" +
-	"\freview.proto\x12\blmreview\"}\n" +
-	"\rReviewRequest\x12\x12\n" +
-	"\x04diff\x18\x01 \x01(\tR\x04diff\x12\x14\n" +
-	"\x05depth\x18\x02 \x01(\tR\x05depth\x12\x18\n" +
-	"\acontext\x18\x03 \x01(\tR\acontext\x12\x14\n" +
-	"\x05model\x18\x04 \x01(\tR\x05model\x12\x12\n" +
-	"\x04path\x18\x05 \x01(\tR\x04path\"\xa2\x01\n" +
+	"\freview.proto\x12\blmreview\"\x94\x01\n" +
+	"\rReviewRequest\x12(\n" +
+	"\x04mode\x18\x01 \x01(\x0e2\x14.lmreview.ReviewModeR\x04mode\x12\x12\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\x12\x14\n" +
+	"\x05depth\x18\x03 \x01(\tR\x05depth\x12\x14\n" +
+	"\x05model\x18\x04 \x01(\tR\x05model\x12\x19\n" +
+	"\bbase_ref\x18\x05 \x01(\tR\abaseRef\"\xa2\x01\n" +
 	"\x0eReviewResponse\x12\x18\n" +
 	"\averdict\x18\x01 \x01(\tR\averdict\x12\x18\n" +
 	"\asummary\x18\x02 \x01(\tR\asummary\x12\x14\n" +
@@ -414,13 +472,17 @@ const file_review_proto_rawDesc = "" +
 	"suggestion\x12\x1e\n" +
 	"\n" +
 	"confidence\x18\t \x01(\tR\n" +
-	"confidence2\x95\x02\n" +
-	"\tLMReviewD\x12?\n" +
+	"confidence*\xa5\x01\n" +
 	"\n" +
-	"ReviewDiff\x12\x17.lmreview.ReviewRequest\x1a\x18.lmreview.ReviewResponse\x12=\n" +
-	"\bReviewPR\x12\x17.lmreview.ReviewRequest\x1a\x18.lmreview.ReviewResponse\x12?\n" +
-	"\n" +
-	"ReviewRepo\x12\x17.lmreview.ReviewRequest\x1a\x18.lmreview.ReviewResponse\x12G\n" +
+	"ReviewMode\x12\x1b\n" +
+	"\x17REVIEW_MODE_UNSPECIFIED\x10\x00\x12\x14\n" +
+	"\x10REVIEW_MODE_AUTO\x10\x01\x12\x1b\n" +
+	"\x17REVIEW_MODE_STAGED_DIFF\x10\x02\x12\x1d\n" +
+	"\x19REVIEW_MODE_WORKTREE_DIFF\x10\x03\x12\x12\n" +
+	"\x0eREVIEW_MODE_PR\x10\x04\x12\x14\n" +
+	"\x10REVIEW_MODE_REPO\x10\x052\x91\x01\n" +
+	"\tLMReviewD\x12;\n" +
+	"\x06Review\x12\x17.lmreview.ReviewRequest\x1a\x18.lmreview.ReviewResponse\x12G\n" +
 	"\fReviewStatic\x12\x1d.lmreview.StaticReviewRequest\x1a\x18.lmreview.ReviewResponseB$Z\"goodkind.io/lm-review/api/reviewpbb\x06proto3"
 
 var (
@@ -435,28 +497,27 @@ func file_review_proto_rawDescGZIP() []byte {
 	return file_review_proto_rawDescData
 }
 
+var file_review_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_review_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_review_proto_goTypes = []any{
-	(*ReviewRequest)(nil),       // 0: lmreview.ReviewRequest
-	(*ReviewResponse)(nil),      // 1: lmreview.ReviewResponse
-	(*StaticReviewRequest)(nil), // 2: lmreview.StaticReviewRequest
-	(*Issue)(nil),               // 3: lmreview.Issue
+	(ReviewMode)(0),             // 0: lmreview.ReviewMode
+	(*ReviewRequest)(nil),       // 1: lmreview.ReviewRequest
+	(*ReviewResponse)(nil),      // 2: lmreview.ReviewResponse
+	(*StaticReviewRequest)(nil), // 3: lmreview.StaticReviewRequest
+	(*Issue)(nil),               // 4: lmreview.Issue
 }
 var file_review_proto_depIdxs = []int32{
-	3, // 0: lmreview.ReviewResponse.issues:type_name -> lmreview.Issue
-	0, // 1: lmreview.LMReviewD.ReviewDiff:input_type -> lmreview.ReviewRequest
-	0, // 2: lmreview.LMReviewD.ReviewPR:input_type -> lmreview.ReviewRequest
-	0, // 3: lmreview.LMReviewD.ReviewRepo:input_type -> lmreview.ReviewRequest
-	2, // 4: lmreview.LMReviewD.ReviewStatic:input_type -> lmreview.StaticReviewRequest
-	1, // 5: lmreview.LMReviewD.ReviewDiff:output_type -> lmreview.ReviewResponse
-	1, // 6: lmreview.LMReviewD.ReviewPR:output_type -> lmreview.ReviewResponse
-	1, // 7: lmreview.LMReviewD.ReviewRepo:output_type -> lmreview.ReviewResponse
-	1, // 8: lmreview.LMReviewD.ReviewStatic:output_type -> lmreview.ReviewResponse
-	5, // [5:9] is the sub-list for method output_type
-	1, // [1:5] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	0, // 0: lmreview.ReviewRequest.mode:type_name -> lmreview.ReviewMode
+	4, // 1: lmreview.ReviewResponse.issues:type_name -> lmreview.Issue
+	1, // 2: lmreview.LMReviewD.Review:input_type -> lmreview.ReviewRequest
+	3, // 3: lmreview.LMReviewD.ReviewStatic:input_type -> lmreview.StaticReviewRequest
+	2, // 4: lmreview.LMReviewD.Review:output_type -> lmreview.ReviewResponse
+	2, // 5: lmreview.LMReviewD.ReviewStatic:output_type -> lmreview.ReviewResponse
+	4, // [4:6] is the sub-list for method output_type
+	2, // [2:4] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_review_proto_init() }
@@ -469,13 +530,14 @@ func file_review_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_review_proto_rawDesc), len(file_review_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_review_proto_goTypes,
 		DependencyIndexes: file_review_proto_depIdxs,
+		EnumInfos:         file_review_proto_enumTypes,
 		MessageInfos:      file_review_proto_msgTypes,
 	}.Build()
 	File_review_proto = out.File

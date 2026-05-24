@@ -139,18 +139,9 @@ func Parse(raw string) (*Result, error) {
 	// Try direct unmarshal first.
 	var result Result
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		// Fall back: extract the first balanced JSON object from surrounding prose.
-		// Using a greedy regex here would grab from the first { in reasoning text
-		// to the last } in the document, producing invalid JSON. Instead we scan
-		// forward from each { to find the one that yields a balanced object.
-		match := extractFirstJSONObject(raw)
+		match := extractReviewJSON(raw)
 		if match == "" {
-			// Last-ditch: strip any unclosed reasoning block and try once more.
-			retry := strings.TrimSpace(reUnclosedThink.ReplaceAllString(raw, ""))
-			match = extractFirstJSONObject(retry)
-			if match == "" {
-				return nil, fmt.Errorf("no JSON found in LLM response: %s", truncate(raw, 200))
-			}
+			return nil, fmt.Errorf("no JSON found in LLM response: %s", truncate(raw, 200))
 		}
 		if err2 := json.Unmarshal([]byte(match), &result); err2 != nil {
 			return nil, fmt.Errorf("parse LLM JSON: %w\nraw: %s", err2, truncate(raw, 200))
@@ -629,6 +620,23 @@ func extractFirstJSONObject(s string) string {
 			}
 		}
 	}
+	return ""
+}
+
+func extractReviewJSON(s string) string {
+	// Using a greedy regex here would grab from the first { in reasoning text
+	// to the last } in the document, producing invalid JSON. Instead we scan
+	// forward from each { to find the one that yields a balanced object.
+	if match := extractFirstJSONObject(s); match != "" {
+		return match
+	}
+
+	// Last-ditch: strip any unclosed reasoning block and try once more.
+	retry := strings.TrimSpace(reUnclosedThink.ReplaceAllString(s, ""))
+	if match := extractFirstJSONObject(retry); match != "" {
+		return match
+	}
+
 	return ""
 }
 

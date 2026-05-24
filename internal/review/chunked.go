@@ -4,31 +4,38 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
 	"goodkind.io/gklog"
+	"goodkind.io/lm-review/internal/clock"
+	"goodkind.io/lm-review/internal/requestmeta"
 )
 
-// ChunkedRepoReview reviews a large codebase by splitting it into chunks,
+// ChunkPromptBuilder builds the user message for one chunk.
+type ChunkPromptBuilder func(input string, chunkNum, totalChunks int) string
+
+// InputSplitter splits prepared review input into bounded chunks.
+type InputSplitter func(input string, maxBytes int) []string
+
+type chunkResult struct {
+	index  int
+	result *Result
+}
+
+// ChunkedReview reviews prepared input by splitting it into chunks,
 // reviewing each independently, then merging the results into one Result.
-// chunkBytes controls the max bytes per chunk sent to the LLM.
-// parallelism controls how many chunks are reviewed concurrently (1 = sequential).
-func ChunkedRepoReview(ctx context.Context, client ChatClient, files string, scope string, rules []string, chunkBytes, parallelism int) (*Result, error) {
-	chunks := splitIntoChunks(files, chunkBytes)
+func ChunkedReview(ctx context.Context, client ChatClient, input string, scope string, rules []string, buildSystemPrompt PromptBuilder, buildFullPrompt UserPromptBuilder, buildChunkPrompt ChunkPromptBuilder, splitInput InputSplitter, chunkBytes, parallelism int) (*Result, error) {
+	chunks := splitInput(input, chunkBytes)
 
 	if len(chunks) == 1 {
-		r := New(client, scope, rules)
-		return r.ReviewRepo(ctx, files)
+		r := NewWithPromptBuilder(client, scope, rules, buildSystemPrompt)
+		return r.ReviewInput(ctx, input, buildFullPrompt)
 	}
 
 	if parallelism < 1 {
 		parallelism = 1
-	}
-
-	type chunkResult struct {
-		index  int
-		result *Result
 	}
 
 	var (
@@ -41,15 +48,19 @@ func ChunkedRepoReview(ctx context.Context, client ChatClient, files string, sco
 
 	for i, chunk := range chunks {
 		g.Go(func() error {
-			raw, err := client.Chat(gctx, BuildSystemPrompt(rules), ChunkPrompt(chunk, i+1, len(chunks)))
-			if err != nil && raw == "" {
-				return fmt.Errorf("chunk %d/%d review: %w", i+1, len(chunks), err)
+			result, err := reviewChunk(gctx, client, chunkReviewRequest{
+				chunk:             chunk,
+				index:             i,
+				total:             len(chunks),
+				parallelism:       parallelism,
+				rules:             rules,
+				buildSystemPrompt: buildSystemPrompt,
+				buildChunkPrompt:  buildChunkPrompt,
+			})
+			if err != nil {
+				return err
 			}
-
-			result, parseErr := Parse(raw)
-			if parseErr != nil {
-				log := gklog.LoggerFromContext(gctx).With("component", "lm-review", "subcomponent", "chunked_review")
-				log.WarnContext(gctx, "skipping unparseable chunk", "chunk", i+1, "total", len(chunks), "err", parseErr)
+			if result == nil {
 				return nil
 			}
 
@@ -118,37 +129,111 @@ func ChunkedRepoReview(ctx context.Context, client ChatClient, files string, sco
 	return merged, nil
 }
 
-// splitIntoChunks splits a files string into chunks of at most maxBytes,
-// respecting file boundaries (never splits mid-file).
-func splitIntoChunks(files string, maxBytes int) []string {
-	if len(files) <= maxBytes {
-		return []string{files}
+type chunkReviewRequest struct {
+	chunk             string
+	index             int
+	total             int
+	parallelism       int
+	rules             []string
+	buildSystemPrompt PromptBuilder
+	buildChunkPrompt  ChunkPromptBuilder
+}
+
+func reviewChunk(ctx context.Context, client ChatClient, req chunkReviewRequest) (*Result, error) {
+	chunkCtx := requestmeta.With(ctx, requestmeta.Metadata{
+		ReviewID:   "",
+		Scope:      "",
+		Mode:       "",
+		Depth:      "",
+		ChunkIndex: req.index + 1,
+		ChunkTotal: req.total,
+	})
+	log := gklog.LoggerFromContext(chunkCtx).With(
+		"component", "lm-review",
+		"subcomponent", "chunked_review",
+		"request_id", requestmeta.From(chunkCtx).RequestID(),
+		"chunk_index", req.index+1,
+		"chunk_total", req.total,
+		"chunk_bytes", len(req.chunk),
+		"parallelism", req.parallelism,
+	)
+	start := clock.Now()
+	log.DebugContext(chunkCtx, "review.chunk.begin")
+	var raw string
+	var err error
+	if structuredClient, ok := client.(reviewChatClient); ok {
+		raw, err = structuredClient.ChatReview(chunkCtx, req.buildSystemPrompt(req.rules), req.buildChunkPrompt(req.chunk, req.index+1, req.total))
+	} else {
+		raw, err = client.Chat(chunkCtx, req.buildSystemPrompt(req.rules), req.buildChunkPrompt(req.chunk, req.index+1, req.total))
+	}
+	latency := clock.Since(start)
+	if err != nil && raw == "" {
+		log.ErrorContext(chunkCtx, "review.chunk.failed", "latency_ms", latency.Milliseconds(), "err", err)
+		return nil, fmt.Errorf("chunk %d/%d review: %w", req.index+1, req.total, err)
+	}
+
+	result, parseErr := Parse(raw)
+	if parseErr != nil {
+		log.WarnContext(chunkCtx, "review.chunk.unparseable",
+			"latency_ms", latency.Milliseconds(),
+			"response_bytes", len(raw),
+			"err", parseErr)
+		return nil, nil
+	}
+	log.DebugContext(chunkCtx, "review.chunk.end",
+		"latency_ms", latency.Milliseconds(),
+		"response_bytes", len(raw),
+		"issue_count", len(result.Issues),
+		"verdict", result.Verdict)
+	return result, nil
+}
+
+// SplitRepoInput splits a repo snapshot into chunks of at most maxBytes when
+// possible, respecting file boundaries first and falling back to hard splits.
+func SplitRepoInput(input string, maxBytes int) []string {
+	return splitIntoChunks(input, maxBytes, "// FILE: ")
+}
+
+// SplitDiffInput splits a diff into chunks of at most maxBytes when possible,
+// respecting file-diff boundaries first and falling back to hard splits.
+func SplitDiffInput(input string, maxBytes int) []string {
+	return splitIntoChunks(input, maxBytes, "diff --git ")
+}
+
+func splitIntoChunks(input string, maxBytes int, marker string) []string {
+	if maxBytes <= 0 || len(input) <= maxBytes {
+		return []string{input}
 	}
 
 	var chunks []string
-	var current string
+	var current strings.Builder
 
-	// Split on file boundaries: each file starts with "// FILE: "
-	parts := splitOnFileMarker(files)
+	parts := splitOnMarker(input, marker)
 	for _, part := range parts {
-		if len(current)+len(part) > maxBytes && current != "" {
-			chunks = append(chunks, current)
-			current = part
-		} else {
-			current += part
+		if len(part) > maxBytes {
+			if current.Len() > 0 {
+				chunks = append(chunks, current.String())
+				current.Reset()
+			}
+			chunks = append(chunks, hardSplit(part, maxBytes)...)
+			continue
 		}
+		if current.Len()+len(part) > maxBytes && current.Len() > 0 {
+			chunks = append(chunks, current.String())
+			current.Reset()
+		}
+		current.WriteString(part)
 	}
-	if current != "" {
-		chunks = append(chunks, current)
+	if current.Len() > 0 {
+		chunks = append(chunks, current.String())
 	}
 
 	return chunks
 }
 
-func splitOnFileMarker(files string) []string {
-	const marker = "// FILE: "
+func splitOnMarker(input, marker string) []string {
 	var parts []string
-	remaining := files
+	remaining := input
 	for {
 		idx := indexAfterFirst(remaining, marker, 1)
 		if idx < 0 {
@@ -159,6 +244,18 @@ func splitOnFileMarker(files string) []string {
 		remaining = remaining[idx:]
 	}
 	return parts
+}
+
+func hardSplit(input string, maxBytes int) []string {
+	var chunks []string
+	for len(input) > maxBytes {
+		chunks = append(chunks, input[:maxBytes])
+		input = input[maxBytes:]
+	}
+	if input != "" {
+		chunks = append(chunks, input)
+	}
+	return chunks
 }
 
 func indexAfterFirst(s, substr string, skip int) int {

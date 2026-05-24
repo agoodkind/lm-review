@@ -12,3 +12,7 @@ type ChatClient interface {
 	// ModelID returns the model identifier this client is configured to use.
 	ModelID() string
 }
+
+type reviewChatClient interface {
+	ChatReview(ctx context.Context, systemPrompt, userMessage string) (string, error)
+}

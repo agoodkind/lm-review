@@ -5,18 +5,25 @@ package lmreview;
 option go_package = "goodkind.io/lm-review/api/reviewpb";
 
 service LMReviewD {
-  rpc ReviewDiff(ReviewRequest) returns (ReviewResponse);
-  rpc ReviewPR(ReviewRequest) returns (ReviewResponse);
-  rpc ReviewRepo(ReviewRequest) returns (ReviewResponse);
+  rpc Review(ReviewRequest) returns (ReviewResponse);
   rpc ReviewStatic(StaticReviewRequest) returns (ReviewResponse);
 }
 
+enum ReviewMode {
+  REVIEW_MODE_UNSPECIFIED = 0;
+  REVIEW_MODE_AUTO = 1;
+  REVIEW_MODE_STAGED_DIFF = 2;
+  REVIEW_MODE_WORKTREE_DIFF = 3;
+  REVIEW_MODE_PR = 4;
+  REVIEW_MODE_REPO = 5;
+}
+
 message ReviewRequest {
-  string diff    = 1;
-  string depth   = 2; // quick | normal | deep | ultra (empty = normal)
-  string context = 3; // optional extra context (e.g. PR title)
-  string model   = 4; // override model for this request (empty = use config)
-  string path    = 5; // absolute path to repo root for project-local rule loading
+  ReviewMode mode = 1;
+  string path = 2; // absolute path to repo root
+  string depth = 3; // quick | normal | deep | ultra (empty = normal)
+  string model = 4; // override model for this request (empty = use config)
+  string base_ref = 5; // optional base ref for PR mode
 }
 
 message ReviewResponse {

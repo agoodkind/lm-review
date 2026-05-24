@@ -252,6 +252,15 @@ func ChunkPrompt(files string, chunkNum, totalChunks int) string {
 	)
 }
 
+// DiffChunkPrompt builds the user message for one chunk of a large diff review.
+func DiffChunkPrompt(diff string, chunkNum, totalChunks int) string {
+	return fmt.Sprintf(
+		"Review chunk %d of %d of this diff. Focus on issues within this chunk; "+
+			"note cross-chunk concerns in tech_debt:\n\n```diff\n%s\n```",
+		chunkNum, totalChunks, diff,
+	)
+}
+
 // StaticPrompt builds the user message for synthesized static review.
 func StaticPrompt(files string, analyzerSection string) string {
 	var sb strings.Builder

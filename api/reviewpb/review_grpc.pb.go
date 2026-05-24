@@ -19,9 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	LMReviewD_ReviewDiff_FullMethodName   = "/lmreview.LMReviewD/ReviewDiff"
-	LMReviewD_ReviewPR_FullMethodName     = "/lmreview.LMReviewD/ReviewPR"
-	LMReviewD_ReviewRepo_FullMethodName   = "/lmreview.LMReviewD/ReviewRepo"
+	LMReviewD_Review_FullMethodName       = "/lmreview.LMReviewD/Review"
 	LMReviewD_ReviewStatic_FullMethodName = "/lmreview.LMReviewD/ReviewStatic"
 )
 
@@ -29,9 +27,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type LMReviewDClient interface {
-	ReviewDiff(ctx context.Context, in *ReviewRequest, opts ...grpc.CallOption) (*ReviewResponse, error)
-	ReviewPR(ctx context.Context, in *ReviewRequest, opts ...grpc.CallOption) (*ReviewResponse, error)
-	ReviewRepo(ctx context.Context, in *ReviewRequest, opts ...grpc.CallOption) (*ReviewResponse, error)
+	Review(ctx context.Context, in *ReviewRequest, opts ...grpc.CallOption) (*ReviewResponse, error)
 	ReviewStatic(ctx context.Context, in *StaticReviewRequest, opts ...grpc.CallOption) (*ReviewResponse, error)
 }
 
@@ -43,30 +39,10 @@ func NewLMReviewDClient(cc grpc.ClientConnInterface) LMReviewDClient {
 	return &lMReviewDClient{cc}
 }
 
-func (c *lMReviewDClient) ReviewDiff(ctx context.Context, in *ReviewRequest, opts ...grpc.CallOption) (*ReviewResponse, error) {
+func (c *lMReviewDClient) Review(ctx context.Context, in *ReviewRequest, opts ...grpc.CallOption) (*ReviewResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ReviewResponse)
-	err := c.cc.Invoke(ctx, LMReviewD_ReviewDiff_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *lMReviewDClient) ReviewPR(ctx context.Context, in *ReviewRequest, opts ...grpc.CallOption) (*ReviewResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ReviewResponse)
-	err := c.cc.Invoke(ctx, LMReviewD_ReviewPR_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *lMReviewDClient) ReviewRepo(ctx context.Context, in *ReviewRequest, opts ...grpc.CallOption) (*ReviewResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ReviewResponse)
-	err := c.cc.Invoke(ctx, LMReviewD_ReviewRepo_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, LMReviewD_Review_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -87,9 +63,7 @@ func (c *lMReviewDClient) ReviewStatic(ctx context.Context, in *StaticReviewRequ
 // All implementations must embed UnimplementedLMReviewDServer
 // for forward compatibility.
 type LMReviewDServer interface {
-	ReviewDiff(context.Context, *ReviewRequest) (*ReviewResponse, error)
-	ReviewPR(context.Context, *ReviewRequest) (*ReviewResponse, error)
-	ReviewRepo(context.Context, *ReviewRequest) (*ReviewResponse, error)
+	Review(context.Context, *ReviewRequest) (*ReviewResponse, error)
 	ReviewStatic(context.Context, *StaticReviewRequest) (*ReviewResponse, error)
 	mustEmbedUnimplementedLMReviewDServer()
 }
@@ -101,14 +75,8 @@ type LMReviewDServer interface {
 // pointer dereference when methods are called.
 type UnimplementedLMReviewDServer struct{}
 
-func (UnimplementedLMReviewDServer) ReviewDiff(context.Context, *ReviewRequest) (*ReviewResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ReviewDiff not implemented")
-}
-func (UnimplementedLMReviewDServer) ReviewPR(context.Context, *ReviewRequest) (*ReviewResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ReviewPR not implemented")
-}
-func (UnimplementedLMReviewDServer) ReviewRepo(context.Context, *ReviewRequest) (*ReviewResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ReviewRepo not implemented")
+func (UnimplementedLMReviewDServer) Review(context.Context, *ReviewRequest) (*ReviewResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Review not implemented")
 }
 func (UnimplementedLMReviewDServer) ReviewStatic(context.Context, *StaticReviewRequest) (*ReviewResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReviewStatic not implemented")
@@ -134,56 +102,20 @@ func RegisterLMReviewDServer(s grpc.ServiceRegistrar, srv LMReviewDServer) {
 	s.RegisterService(&LMReviewD_ServiceDesc, srv)
 }
 
-func _LMReviewD_ReviewDiff_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _LMReviewD_Review_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ReviewRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(LMReviewDServer).ReviewDiff(ctx, in)
+		return srv.(LMReviewDServer).Review(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: LMReviewD_ReviewDiff_FullMethodName,
+		FullMethod: LMReviewD_Review_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LMReviewDServer).ReviewDiff(ctx, req.(*ReviewRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _LMReviewD_ReviewPR_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ReviewRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(LMReviewDServer).ReviewPR(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: LMReviewD_ReviewPR_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LMReviewDServer).ReviewPR(ctx, req.(*ReviewRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _LMReviewD_ReviewRepo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ReviewRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(LMReviewDServer).ReviewRepo(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: LMReviewD_ReviewRepo_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LMReviewDServer).ReviewRepo(ctx, req.(*ReviewRequest))
+		return srv.(LMReviewDServer).Review(ctx, req.(*ReviewRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -214,16 +146,8 @@ var LMReviewD_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*LMReviewDServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "ReviewDiff",
-			Handler:    _LMReviewD_ReviewDiff_Handler,
-		},
-		{
-			MethodName: "ReviewPR",
-			Handler:    _LMReviewD_ReviewPR_Handler,
-		},
-		{
-			MethodName: "ReviewRepo",
-			Handler:    _LMReviewD_ReviewRepo_Handler,
+			MethodName: "Review",
+			Handler:    _LMReviewD_Review_Handler,
 		},
 		{
 			MethodName: "ReviewStatic",

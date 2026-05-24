@@ -70,6 +70,7 @@ func main() {
 	root.AddCommand(newDiffCmd())
 	root.AddCommand(newPRCmd())
 	root.AddCommand(newRepoCmd())
+	root.AddCommand(newReviewCmd())
 	root.AddCommand(newDaemonCmd())
 	root.AddCommand(newMCPCmd())
 	root.AddCommand(newInitCmd())
@@ -97,11 +98,7 @@ func newDiffCmd() *cobra.Command {
 			if !ok {
 				return nil
 			}
-			diff, diffErr := gitutil.StagedDiff(repoRoot)
-			if diffErr != nil {
-				return fmt.Errorf("staged diff: %w", diffErr)
-			}
-			return runReview(cmd.Context(), "diff", diff, repoRoot, depth, model)
+			return runReview(cmd.Context(), "diff", reviewpb.ReviewMode_REVIEW_MODE_STAGED_DIFF, repoRoot, depth, model, "")
 		},
 	}
 	cmd.Flags().StringVar(&depth, "depth", "normal", "Review depth: quick, normal, deep, ultra")
@@ -112,7 +109,7 @@ func newDiffCmd() *cobra.Command {
 }
 
 func newPRCmd() *cobra.Command {
-	var depth, model string
+	var baseRef, depth, model string
 	var deepCompat bool
 	cmd := &cobra.Command{
 		Use:   "pr",
@@ -125,17 +122,38 @@ func newPRCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("git root: %w", err)
 			}
-			diff, err := gitutil.PRDiff(repoRoot)
-			if err != nil {
-				return fmt.Errorf("pr diff: %w", err)
-			}
-			return runReview(cmd.Context(), "pr", diff, repoRoot, depth, model)
+			return runReview(cmd.Context(), "pr", reviewpb.ReviewMode_REVIEW_MODE_PR, repoRoot, depth, model, baseRef)
 		},
 	}
+	cmd.Flags().StringVar(&baseRef, "base-ref", "", "Base ref for PR diff")
 	cmd.Flags().StringVar(&depth, "depth", "normal", "Review depth: quick, normal, deep, ultra")
 	cmd.Flags().StringVar(&model, "model", "", "Override model for this request")
 	cmd.Flags().BoolVar(&deepCompat, "deep", false, "Alias for --depth deep (deprecated)")
 	_ = cmd.Flags().MarkHidden("deep")
+	return cmd
+}
+
+func newReviewCmd() *cobra.Command {
+	var baseRef, depth, mode, model string
+	cmd := &cobra.Command{
+		Use:   "review",
+		Short: "Review the repo using a path-based mode",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			repoRoot, ok := tryFindRepoRoot(cmd.Context())
+			if !ok {
+				return nil
+			}
+			reviewMode, err := parseReviewMode(mode)
+			if err != nil {
+				return err
+			}
+			return runReview(cmd.Context(), "review", reviewMode, repoRoot, depth, model, baseRef)
+		},
+	}
+	cmd.Flags().StringVar(&baseRef, "base-ref", "", "Base ref for PR mode")
+	cmd.Flags().StringVar(&depth, "depth", "normal", "Review depth: quick, normal, deep, ultra")
+	cmd.Flags().StringVar(&mode, "mode", "auto", "Review mode: auto, staged, worktree, pr, repo")
+	cmd.Flags().StringVar(&model, "model", "", "Override model for this request")
 	return cmd
 }
 
@@ -170,11 +188,6 @@ func runRepoSync(ctx context.Context, depth, model string) error {
 	if err != nil {
 		return fmt.Errorf("git root: %w", err)
 	}
-	files, err := gitutil.RepoSnapshot(repoRoot, 0)
-	if err != nil {
-		return fmt.Errorf("repo snapshot: %w", err)
-	}
-
 	client, err := daemon.Connect(ctx)
 	if err != nil {
 		lmReviewLog(ctx).InfoContext(ctx, "skipping review: daemon unavailable", "err", err)
@@ -182,7 +195,7 @@ func runRepoSync(ctx context.Context, depth, model string) error {
 	}
 	defer client.Close()
 
-	resp, err := client.ReviewRepo(ctx, files, repoRoot, depth, model)
+	resp, err := client.Review(ctx, reviewpb.ReviewMode_REVIEW_MODE_REPO, repoRoot, depth, model, "")
 	if err != nil {
 		return fmt.Errorf("review repo: %w", err)
 	}
@@ -224,11 +237,11 @@ func newMCPCmd() *cobra.Command {
 	}
 }
 
-// runReview connects to the daemon, runs a diff or PR review, prints
-// and posts the result, and signals a block verdict via [errBlock].
-func runReview(ctx context.Context, scope, diff, repoPath, depth, model string) error {
+// runReview connects to the daemon, runs a path-based review, prints and posts
+// the result, and signals a block verdict via [errBlock].
+func runReview(ctx context.Context, scope string, mode reviewpb.ReviewMode, repoPath, depth, model string, baseRef string) error {
 	lmReviewLog(ctx).InfoContext(ctx, "lm-review.runReview.begin",
-		"scope", scope, "depth", depth, "model", model)
+		"scope", scope, "mode", mode.String(), "depth", depth, "model", model)
 
 	client, err := daemon.Connect(ctx)
 	if err != nil {
@@ -237,13 +250,7 @@ func runReview(ctx context.Context, scope, diff, repoPath, depth, model string) 
 	}
 	defer client.Close()
 
-	var resp *reviewpb.ReviewResponse
-	switch scope {
-	case "diff":
-		resp, err = client.ReviewDiff(ctx, diff, repoPath, depth, model)
-	case "pr":
-		resp, err = client.ReviewPR(ctx, diff, repoPath, depth, model)
-	}
+	resp, err := client.Review(ctx, mode, repoPath, depth, model, baseRef)
 	if err != nil {
 		lmReviewLog(ctx).ErrorContext(ctx, "lm-review.runReview.failed", "scope", scope, "err", err)
 		return fmt.Errorf("review: %w", err)
@@ -274,7 +281,7 @@ func printResult(resp *reviewpb.ReviewResponse) {
 
 func formatMarkdown(scope string, resp *reviewpb.ReviewResponse) string {
 	icon := map[string]string{"pass": "✅", "warn": "⚠️", "block": "🚫"}[resp.GetVerdict()]
-	label := map[string]string{"diff": "Fast Review", "pr": "PR Review", "repo": "Repo Health"}[scope]
+	label := map[string]string{"diff": "Fast Review", "pr": "PR Review", "repo": "Repo Health", "review": "Review"}[scope]
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "## 🤖 %s (%s, %dms)\n\n**Verdict:** %s %s\n\n%s\n",
 		label, resp.GetModel(), resp.GetLatencyMs(), icon, strings.ToUpper(resp.GetVerdict()), resp.GetSummary())
@@ -287,6 +294,37 @@ func formatMarkdown(scope string, resp *reviewpb.ReviewResponse) string {
 	}
 	fmt.Fprintf(&sb, "\n<!-- lm-review:%s -->\n", scope)
 	return sb.String()
+}
+
+type reviewModeName string
+
+const (
+	reviewModeNameEmpty    reviewModeName = ""
+	reviewModeNameAuto     reviewModeName = "auto"
+	reviewModeNameStaged   reviewModeName = "staged"
+	reviewModeNameStagedID reviewModeName = "staged_diff"
+	reviewModeNameDiff     reviewModeName = "diff"
+	reviewModeNameWorktree reviewModeName = "worktree"
+	reviewModeNameWorkID   reviewModeName = "worktree_diff"
+	reviewModeNamePR       reviewModeName = "pr"
+	reviewModeNameRepo     reviewModeName = "repo"
+)
+
+func parseReviewMode(mode string) (reviewpb.ReviewMode, error) {
+	switch reviewModeName(strings.ToLower(mode)) {
+	case reviewModeNameEmpty, reviewModeNameAuto:
+		return reviewpb.ReviewMode_REVIEW_MODE_AUTO, nil
+	case reviewModeNameStaged, reviewModeNameStagedID, reviewModeNameDiff:
+		return reviewpb.ReviewMode_REVIEW_MODE_STAGED_DIFF, nil
+	case reviewModeNameWorktree, reviewModeNameWorkID:
+		return reviewpb.ReviewMode_REVIEW_MODE_WORKTREE_DIFF, nil
+	case reviewModeNamePR:
+		return reviewpb.ReviewMode_REVIEW_MODE_PR, nil
+	case reviewModeNameRepo:
+		return reviewpb.ReviewMode_REVIEW_MODE_REPO, nil
+	default:
+		return reviewpb.ReviewMode_REVIEW_MODE_UNSPECIFIED, fmt.Errorf("unknown review mode %q", mode)
+	}
 }
 
 func runRepoAsync(ctx context.Context) error {

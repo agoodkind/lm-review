@@ -10,6 +10,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"goodkind.io/gklog"
 	"goodkind.io/lm-review/api/reviewpb"
 	"goodkind.io/lm-review/internal/daemon"
 	"goodkind.io/lm-review/internal/gitutil"
@@ -23,8 +24,24 @@ import (
 func Serve(ctx context.Context) error {
 	s := server.NewMCPServer("lm-review", version.Version)
 
-	// --- Resources ---
+	addGettingStartedResource(s)
+	addGettingStartedPrompt(s)
 
+	modelFlag := mcp.WithString("model",
+		mcp.Description("Override the model for this request (e.g. 'qwen/qwen3-coder-next'). Uses config default if omitted."),
+	)
+
+	depthFlag := mcp.WithString("depth",
+		mcp.Description("Review depth: quick (security+correctness only), normal (default), deep (larger model), ultra (two-pass verification with largest model)."),
+	)
+
+	addReviewTool(s, depthFlag, modelFlag)
+	addStaticTool(s, depthFlag, modelFlag)
+
+	return server.ServeStdio(s)
+}
+
+func addGettingStartedResource(s *server.MCPServer) {
 	s.AddResource(
 		mcp.Resource{
 			URI:         "lm-review://getting-started",
@@ -43,24 +60,11 @@ Local LLM code review tool powered by LM Studio.
 
 ## Tools
 
-### review_diff
-Reviews staged git changes (` + "`git add`" + ` first). Best for pre-commit checks.
-
-### review_pr
-Reviews all changes on the current branch vs main. Best for PR readiness.
-
-### review_repo
-Full repository health review. Scans all Go source files for tech debt, security issues, and structural problems. Large repos are automatically chunked.
+### review
+Path-based review launcher. The daemon loads staged, worktree, PR, or repo input from the git path and chunks large inputs automatically.
 
 ### review_static
 Runs deterministic static analysis with go vet, staticcheck, custom analyzers, and optional semgrep. It can return raw findings or synthesize them through the LLM.
-
-## Prompts
-
-### run_review
-Interactive review launcher. Picks the right scope and depth based on your intent. Arguments:
-- **scope**: "diff", "pr", or "repo"
-- **deep**: "true" for the deep model (slower, more thorough), "false" for fast model
 
 ## Depth
 
@@ -84,9 +88,9 @@ Project-local rules can be added via ` + "`.lm-review.toml`" + ` in the repo roo
 			}, nil
 		},
 	)
+}
 
-	// --- Prompts ---
-
+func addGettingStartedPrompt(s *server.MCPServer) {
 	s.AddPrompt(
 		mcp.Prompt{
 			Name:        "getting_started",
@@ -101,37 +105,30 @@ Project-local rules can be added via ` + "`.lm-review.toml`" + ` in the repo roo
 						Content: mcp.NewTextContent(`You have access to lm-review, a local LLM code review tool powered by LM Studio.
 
 Available tools:
-- review_diff: Reviews staged git changes. Run "git add" first, then call this tool. Best for pre-commit checks.
-- review_pr: Reviews all changes on the current branch vs main. Best for PR readiness.
-- review_repo: Full repository health review. Scans all source files for tech debt, security issues, and structural problems.
+- review: Path-based review launcher. Defaults to auto mode: staged diff, worktree diff, PR diff, then repo snapshot.
 - review_static: Runs deterministic static analysis with go vet, staticcheck, custom analyzers, and optional semgrep. It supports raw analyzer findings or synthesized review output.
 
 Each tool accepts:
+- mode (string): "auto" (default), "staged", "worktree", "pr", or "repo".
 - depth (string): "quick" (security+correctness only), "normal" (default), "deep" (larger model), "ultra" (two-pass verification).
 - model (string): Override the model for this request.
 - path (string): Path to git repo root. Auto-detected if omitted.
 
-Start by checking if there are staged changes with "git diff --cached --stat". If there are, run review_diff. If not, check if the current branch has commits ahead of main. If so, run review_pr. Otherwise, offer to run review_repo for a full health check.`),
+Start with review in auto mode unless the user explicitly requests a narrower mode.`),
 					},
 				},
 			}, nil
 		},
 	)
+}
 
-	// --- Tools ---
-
-	modelFlag := mcp.WithString("model",
-		mcp.Description("Override the model for this request (e.g. 'qwen/qwen3-coder-next'). Uses config default if omitted."),
-	)
-
-	depthFlag := mcp.WithString("depth",
-		mcp.Description("Review depth: quick (security+correctness only), normal (default), deep (larger model), ultra (two-pass verification with largest model)."),
-	)
-
+func addReviewTool(s *server.MCPServer, depthFlag mcp.ToolOption, modelFlag mcp.ToolOption) {
 	s.AddTool(
-		mcp.NewTool("review_diff",
-			mcp.WithDescription("Review staged git changes for code quality, style, and correctness."),
+		mcp.NewTool("review",
+			mcp.WithDescription("Path-based LLM review. Auto mode reviews staged, worktree, PR, then repo input without sending source over gRPC."),
+			mcp.WithString("mode", mcp.Description("Review mode: auto (default), staged, worktree, pr, or repo.")),
 			depthFlag,
+			mcp.WithString("base_ref", mcp.Description("Optional base ref for PR mode.")),
 			mcp.WithString("path", mcp.Description("Path to git repo root (optional, auto-detected if omitted).")),
 			modelFlag,
 		),
@@ -142,64 +139,18 @@ Start by checking if there are staged changes with "git diff --cached --stat". I
 			if err != nil {
 				return mcp.NewToolResultText(err.Error()), nil
 			}
-			diff, err := gitutil.StagedDiff(repoRoot)
-			if err != nil || strings.TrimSpace(diff) == "" {
-				return mcp.NewToolResultText("No staged changes to review. Stage files with `git add` first."), nil
-			}
-			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-				return c.ReviewDiff(ctx, diff, repoRoot, depth, model)
-			})
-		},
-	)
-
-	s.AddTool(
-		mcp.NewTool("review_pr",
-			mcp.WithDescription("Review all changes on the current branch vs main."),
-			depthFlag,
-			mcp.WithString("path", mcp.Description("Path to git repo root (optional, auto-detected if omitted).")),
-			modelFlag,
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			depth := req.GetString("depth", "normal")
-			model := req.GetString("model", "")
-			repoRoot, err := gitutil.Root(req.GetString("path", ""))
+			mode, err := parseReviewMode(req.GetString("mode", "auto"))
 			if err != nil {
 				return mcp.NewToolResultText(err.Error()), nil
 			}
-			diff, err := gitutil.PRDiff(repoRoot)
-			if err != nil || strings.TrimSpace(diff) == "" {
-				return mcp.NewToolResultText("No changes vs main branch, or main branch not found."), nil
-			}
 			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-				return c.ReviewPR(ctx, diff, repoRoot, depth, model)
+				return c.Review(ctx, mode, repoRoot, depth, model, req.GetString("base_ref", ""))
 			})
 		},
 	)
+}
 
-	s.AddTool(
-		mcp.NewTool("review_repo",
-			mcp.WithDescription("Full repository health review: tech debt, structural issues, improvement opportunities."),
-			depthFlag,
-			mcp.WithString("path", mcp.Description("Path to git repo root (optional, auto-detected if omitted).")),
-			modelFlag,
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			depth := req.GetString("depth", "normal")
-			model := req.GetString("model", "")
-			repoRoot, err := gitutil.Root(req.GetString("path", ""))
-			if err != nil {
-				return mcp.NewToolResultText(err.Error()), nil
-			}
-			files, err := gitutil.RepoSnapshot(repoRoot, 0)
-			if err != nil || strings.TrimSpace(files) == "" {
-				return mcp.NewToolResultText("No Go files found in repo."), nil
-			}
-			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-				return c.ReviewRepo(ctx, files, repoRoot, depth, model)
-			})
-		},
-	)
-
+func addStaticTool(s *server.MCPServer, depthFlag mcp.ToolOption, modelFlag mcp.ToolOption) {
 	s.AddTool(
 		mcp.NewTool("review_static",
 			mcp.WithDescription("Run deterministic static analysis across the repo or changed Go files. Supports raw findings or LLM-synthesized review output."),
@@ -207,35 +158,35 @@ Start by checking if there are staged changes with "git diff --cached --stat". I
 			depthFlag,
 			mcp.WithBoolean("synthesize", mcp.Description("When true, synthesize analyzer findings with the LLM. When false, return raw deterministic findings only.")),
 			mcp.WithString("path", mcp.Description("Path to git repo root (optional, auto-detected if omitted).")),
-			mcp.WithArray("disabled_sources", mcp.Description("Optional source opt-out list: vet, staticcheck, custom, semgrep."), mcp.Items(map[string]any{"type": "string"})),
-			mcp.WithArray("enabled_checks", mcp.Description("Optional exact check allowlist, such as SA4006 or slog_error_without_err."), mcp.Items(map[string]any{"type": "string"})),
+			mcp.WithArray("disabled_sources", mcp.Description("Optional source opt-out list: vet, staticcheck, custom, semgrep."), mcp.WithStringItems()),
+			mcp.WithArray("enabled_checks", mcp.Description("Optional exact check allowlist, such as SA4006 or slog_error_without_err."), mcp.WithStringItems()),
 			modelFlag,
 		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			repoRoot, err := gitutil.Root(req.GetString("path", ""))
-			if err != nil {
-				return mcp.NewToolResultText(err.Error()), nil
-			}
-			scope := req.GetString("scope", "repo")
-			selectedFiles, err := staticFilesForScope(repoRoot, scope)
-			if err != nil {
-				return mcp.NewToolResultText(err.Error()), nil
-			}
-			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-				return c.ReviewStatic(ctx, &reviewpb.StaticReviewRequest{
-					Path:            repoRoot,
-					Files:           selectedFiles,
-					DisabledSources: req.GetStringSlice("disabled_sources", []string{}),
-					EnabledChecks:   req.GetStringSlice("enabled_checks", []string{}),
-					Synthesize:      req.GetBool("synthesize", true),
-					Depth:           req.GetString("depth", "normal"),
-					Model:           req.GetString("model", ""),
-				})
-			})
-		},
+		callStaticReview,
 	)
+}
 
-	return server.ServeStdio(s)
+func callStaticReview(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	repoRoot, err := gitutil.Root(req.GetString("path", ""))
+	if err != nil {
+		return mcp.NewToolResultText(err.Error()), nil
+	}
+	scope := req.GetString("scope", "repo")
+	selectedFiles, err := staticFilesForScope(ctx, repoRoot, scope)
+	if err != nil {
+		return mcp.NewToolResultText(err.Error()), nil
+	}
+	return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
+		return c.ReviewStatic(ctx, &reviewpb.StaticReviewRequest{
+			Path:            repoRoot,
+			Files:           selectedFiles,
+			DisabledSources: req.GetStringSlice("disabled_sources", []string{}),
+			EnabledChecks:   req.GetStringSlice("enabled_checks", []string{}),
+			Synthesize:      req.GetBool("synthesize", true),
+			Depth:           req.GetString("depth", "normal"),
+			Model:           req.GetString("model", ""),
+		})
+	})
 }
 
 func callDaemon(ctx context.Context, fn func(*daemon.Client) (*reviewpb.ReviewResponse, error)) (*mcp.CallToolResult, error) {
@@ -253,6 +204,37 @@ func callDaemon(ctx context.Context, fn func(*daemon.Client) (*reviewpb.ReviewRe
 	return mcp.NewToolResultText(formatResponse(resp)), nil
 }
 
+type reviewModeName string
+
+const (
+	reviewModeNameEmpty    reviewModeName = ""
+	reviewModeNameAuto     reviewModeName = "auto"
+	reviewModeNameStaged   reviewModeName = "staged"
+	reviewModeNameStagedID reviewModeName = "staged_diff"
+	reviewModeNameDiff     reviewModeName = "diff"
+	reviewModeNameWorktree reviewModeName = "worktree"
+	reviewModeNameWorkID   reviewModeName = "worktree_diff"
+	reviewModeNamePR       reviewModeName = "pr"
+	reviewModeNameRepo     reviewModeName = "repo"
+)
+
+func parseReviewMode(mode string) (reviewpb.ReviewMode, error) {
+	switch reviewModeName(strings.ToLower(mode)) {
+	case reviewModeNameEmpty, reviewModeNameAuto:
+		return reviewpb.ReviewMode_REVIEW_MODE_AUTO, nil
+	case reviewModeNameStaged, reviewModeNameStagedID, reviewModeNameDiff:
+		return reviewpb.ReviewMode_REVIEW_MODE_STAGED_DIFF, nil
+	case reviewModeNameWorktree, reviewModeNameWorkID:
+		return reviewpb.ReviewMode_REVIEW_MODE_WORKTREE_DIFF, nil
+	case reviewModeNamePR:
+		return reviewpb.ReviewMode_REVIEW_MODE_PR, nil
+	case reviewModeNameRepo:
+		return reviewpb.ReviewMode_REVIEW_MODE_REPO, nil
+	default:
+		return reviewpb.ReviewMode_REVIEW_MODE_UNSPECIFIED, fmt.Errorf("unknown review mode %q", mode)
+	}
+}
+
 func formatResponse(resp *reviewpb.ReviewResponse) string {
 	icon := map[string]string{"pass": "PASS", "warn": "WARN", "block": "BLOCK", "skip": "SKIP"}[resp.Verdict]
 	var sb strings.Builder
@@ -266,21 +248,33 @@ func formatResponse(resp *reviewpb.ReviewResponse) string {
 	return sb.String()
 }
 
-func staticFilesForScope(repoRoot string, scope string) ([]string, error) {
-	switch scope {
-	case "diff":
+type staticScopeName string
+
+const (
+	staticScopeNameEmpty staticScopeName = ""
+	staticScopeNameDiff  staticScopeName = "diff"
+	staticScopeNamePR    staticScopeName = "pr"
+	staticScopeNameRepo  staticScopeName = "repo"
+)
+
+func staticFilesForScope(ctx context.Context, repoRoot string, scope string) ([]string, error) {
+	log := gklog.LoggerFromContext(ctx).With("component", "lm-review", "subcomponent", "mcp")
+	switch staticScopeName(scope) {
+	case staticScopeNameDiff:
 		diff, err := gitutil.StagedDiff(repoRoot)
 		if err != nil {
+			log.ErrorContext(ctx, "mcp.static_files.staged_diff_failed", "err", err)
 			return nil, fmt.Errorf("load staged diff: %w", err)
 		}
 		return goFilesOnly(review.FilesFromDiff(diff)), nil
-	case "pr":
-		diff, err := gitutil.PRDiff(repoRoot)
+	case staticScopeNamePR:
+		diff, err := gitutil.PRDiff(repoRoot, "")
 		if err != nil {
+			log.ErrorContext(ctx, "mcp.static_files.pr_diff_failed", "err", err)
 			return nil, fmt.Errorf("load PR diff: %w", err)
 		}
 		return goFilesOnly(review.FilesFromDiff(diff)), nil
-	case "repo", "":
+	case staticScopeNameRepo, staticScopeNameEmpty:
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("unknown static scope %q (expected diff, pr, or repo)", scope)
