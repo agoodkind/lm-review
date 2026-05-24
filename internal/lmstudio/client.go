@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 
 	"goodkind.io/gklog"
 	"goodkind.io/lm-review/internal/clock"
+	"goodkind.io/lm-review/internal/config"
 	"goodkind.io/lm-review/internal/requestmeta"
 )
 
@@ -35,11 +37,12 @@ type Client struct {
 	model          string
 	maxTokens      int64
 	requestTimeout time.Duration
+	settings       config.ChatSettings
 }
 
 // New creates a Client targeting the given OpenAI-compatible base URL with the provided token.
 // maxTokens caps the response length to prevent infinite generation loops.
-func New(baseURL, token, model string, maxTokens int, requestTimeout time.Duration) *Client {
+func New(baseURL, token, model string, maxTokens int, requestTimeout time.Duration, settings config.ChatSettings) *Client {
 	c := openai.NewClient(
 		option.WithBaseURL(baseURL+"/v1"),
 		option.WithAPIKey(token),
@@ -51,6 +54,7 @@ func New(baseURL, token, model string, maxTokens int, requestTimeout time.Durati
 		model:          model,
 		maxTokens:      int64(maxTokens),
 		requestTimeout: requestTimeout,
+		settings:       settings,
 	}
 }
 
@@ -72,54 +76,13 @@ func (c *Client) chat(ctx context.Context, systemPrompt, userMessage string, res
 		requestID = newChatRequestID()
 	}
 
-	log := gklog.LoggerFromContext(ctx).With(
-		"component", "lm-review",
-		"subcomponent", "openai_compat",
-		"request_id", requestID,
-		"review_id", metadata.ReviewID,
-		"scope", metadata.Scope,
-		"mode", metadata.Mode,
-		"depth", metadata.Depth,
-		"chunk_index", metadata.ChunkIndex,
-		"chunk_total", metadata.ChunkTotal,
-		"base_url", c.baseURL,
-		"model", c.model,
-		"system_bytes", len(systemPrompt),
-		"user_bytes", len(userMessage),
-		"max_response_tokens", c.maxTokens,
-		"timeout_ms", c.requestTimeout.Milliseconds(),
-	)
-
+	log := c.requestLogger(ctx, metadata, requestID, systemPrompt, userMessage)
 	var httpResp *http.Response
-	opts := []option.RequestOption{
-		option.WithHeader("X-LM-Review-Request-ID", requestID),
-		option.WithRequestTimeout(c.requestTimeout),
-		option.WithResponseInto(&httpResp),
-	}
-	if metadata.ReviewID != "" {
-		opts = append(opts, option.WithHeader("X-LM-Review-ID", metadata.ReviewID))
-	}
-	if metadata.ChunkIndex > 0 && metadata.ChunkTotal > 0 {
-		opts = append(opts,
-			option.WithHeader("X-LM-Review-Chunk-Index", strconv.Itoa(metadata.ChunkIndex)),
-			option.WithHeader("X-LM-Review-Chunk-Total", strconv.Itoa(metadata.ChunkTotal)),
-		)
-	}
+	opts := c.requestOptions(metadata, requestID, &httpResp)
 
 	start := clock.Now()
 	log.InfoContext(ctx, "openai.chat.begin")
-	params := openai.ChatCompletionNewParams{
-		Model: c.model,
-		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage(systemPrompt),
-			openai.UserMessage(userMessage),
-		},
-		Temperature: param.NewOpt[float64](0.1),
-		MaxTokens:   param.NewOpt[int64](c.maxTokens),
-	}
-	if responseFormat != nil {
-		params.ResponseFormat = *responseFormat
-	}
+	params := c.chatParams(systemPrompt, userMessage, responseFormat)
 	resp, err := c.inner.Chat.Completions.New(ctx, params, opts...)
 	latency := clock.Since(start)
 	if err != nil {
@@ -154,11 +117,123 @@ func (c *Client) chat(ctx context.Context, systemPrompt, userMessage string, res
 	return content, nil
 }
 
+func (c *Client) requestLogger(ctx context.Context, metadata requestmeta.Metadata, requestID, systemPrompt, userMessage string) *slog.Logger {
+	return gklog.LoggerFromContext(ctx).With(
+		"component", "lm-review",
+		"subcomponent", "openai_compat",
+		"request_id", requestID,
+		"review_id", metadata.ReviewID,
+		"scope", metadata.Scope,
+		"mode", metadata.Mode,
+		"depth", metadata.Depth,
+		"chunk_index", metadata.ChunkIndex,
+		"chunk_total", metadata.ChunkTotal,
+		"base_url", c.baseURL,
+		"model", c.model,
+		"system_bytes", len(systemPrompt),
+		"user_bytes", len(userMessage),
+		"max_response_tokens", c.maxTokens,
+		"temperature", c.settings.Temperature,
+		"top_p", derefFloat64(c.settings.TopP),
+		"top_p_set", c.settings.TopP != nil,
+		"top_k", derefInt(c.settings.TopK),
+		"top_k_set", c.settings.TopK != nil,
+		"presence_penalty", derefFloat64(c.settings.PresencePenalty),
+		"presence_penalty_set", c.settings.PresencePenalty != nil,
+		"frequency_penalty", derefFloat64(c.settings.FrequencyPenalty),
+		"frequency_penalty_set", c.settings.FrequencyPenalty != nil,
+		"repeat_penalty", derefFloat64(c.settings.RepeatPenalty),
+		"repeat_penalty_set", c.settings.RepeatPenalty != nil,
+		"seed", derefInt64(c.settings.Seed),
+		"seed_set", c.settings.Seed != nil,
+		"stop_count", len(c.settings.Stop),
+		"timeout_ms", c.requestTimeout.Milliseconds(),
+	)
+}
+
+func (c *Client) requestOptions(metadata requestmeta.Metadata, requestID string, httpResp **http.Response) []option.RequestOption {
+	opts := []option.RequestOption{
+		option.WithHeader("X-LM-Review-Request-ID", requestID),
+		option.WithRequestTimeout(c.requestTimeout),
+		option.WithResponseInto(httpResp),
+	}
+	if metadata.ReviewID != "" {
+		opts = append(opts, option.WithHeader("X-LM-Review-ID", metadata.ReviewID))
+	}
+	if metadata.ChunkIndex > 0 && metadata.ChunkTotal > 0 {
+		opts = append(opts,
+			option.WithHeader("X-LM-Review-Chunk-Index", strconv.Itoa(metadata.ChunkIndex)),
+			option.WithHeader("X-LM-Review-Chunk-Total", strconv.Itoa(metadata.ChunkTotal)),
+		)
+	}
+	if c.settings.TopK != nil {
+		opts = append(opts, option.WithJSONSet("top_k", *c.settings.TopK))
+	}
+	if c.settings.RepeatPenalty != nil {
+		opts = append(opts, option.WithJSONSet("repeat_penalty", *c.settings.RepeatPenalty))
+	}
+	return opts
+}
+
+func (c *Client) chatParams(systemPrompt, userMessage string, responseFormat *openai.ChatCompletionNewParamsResponseFormatUnion) openai.ChatCompletionNewParams {
+	params := openai.ChatCompletionNewParams{
+		Model: c.model,
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage(systemPrompt),
+			openai.UserMessage(userMessage),
+		},
+		Temperature: param.NewOpt(c.settings.Temperature),
+		MaxTokens:   param.NewOpt[int64](c.maxTokens),
+	}
+	if c.settings.TopP != nil {
+		params.TopP = param.NewOpt(*c.settings.TopP)
+	}
+	if c.settings.PresencePenalty != nil {
+		params.PresencePenalty = param.NewOpt(*c.settings.PresencePenalty)
+	}
+	if c.settings.FrequencyPenalty != nil {
+		params.FrequencyPenalty = param.NewOpt(*c.settings.FrequencyPenalty)
+	}
+	if c.settings.Seed != nil {
+		params.Seed = param.NewOpt(*c.settings.Seed)
+	}
+	if len(c.settings.Stop) > 0 {
+		params.Stop = openai.ChatCompletionNewParamsStopUnion{
+			OfStringArray: append([]string{}, c.settings.Stop...),
+		}
+	}
+	if responseFormat != nil {
+		params.ResponseFormat = *responseFormat
+	}
+	return params
+}
+
 func responseStatusCode(resp *http.Response) int {
 	if resp == nil {
 		return 0
 	}
 	return resp.StatusCode
+}
+
+func derefFloat64(value *float64) float64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func derefInt(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func derefInt64(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func newChatRequestID() string {

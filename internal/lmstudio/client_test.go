@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"goodkind.io/lm-review/internal/config"
 )
 
 func TestChatReviewSendsJSONSchemaResponseFormat(t *testing.T) {
@@ -62,7 +64,62 @@ func TestChatOmitsResponseFormatByDefault(t *testing.T) {
 	}
 }
 
+func TestChatSendsConfiguredInferenceKnobs(t *testing.T) {
+	topP := 0.9
+	topK := 40
+	presencePenalty := 0.2
+	frequencyPenalty := 0.3
+	repeatPenalty := 1.05
+	seed := int64(99)
+	settings := config.ChatSettings{
+		Temperature:      0,
+		TopP:             &topP,
+		TopK:             &topK,
+		PresencePenalty:  &presencePenalty,
+		FrequencyPenalty: &frequencyPenalty,
+		RepeatPenalty:    &repeatPenalty,
+		Seed:             &seed,
+		Stop:             []string{"DONE", "STOP"},
+	}
+
+	requestBody := captureChatRequestWithSettings(t, settings, func(client *Client) error {
+		_, err := client.Chat(context.Background(), "system prompt", "user prompt")
+		return err
+	})
+
+	if got := requireFloat64(t, requestBody["temperature"], "temperature"); got != 0 {
+		t.Fatalf("temperature=%v, want 0", got)
+	}
+	if got := requireFloat64(t, requestBody["top_p"], "top_p"); got != topP {
+		t.Fatalf("top_p=%v, want %v", got, topP)
+	}
+	if got := requireFloat64(t, requestBody["presence_penalty"], "presence_penalty"); got != presencePenalty {
+		t.Fatalf("presence_penalty=%v, want %v", got, presencePenalty)
+	}
+	if got := requireFloat64(t, requestBody["frequency_penalty"], "frequency_penalty"); got != frequencyPenalty {
+		t.Fatalf("frequency_penalty=%v, want %v", got, frequencyPenalty)
+	}
+	if got := requireFloat64(t, requestBody["repeat_penalty"], "repeat_penalty"); got != repeatPenalty {
+		t.Fatalf("repeat_penalty=%v, want %v", got, repeatPenalty)
+	}
+	if got := requireFloat64(t, requestBody["seed"], "seed"); got != float64(seed) {
+		t.Fatalf("seed=%v, want %d", got, seed)
+	}
+	if got := requireFloat64(t, requestBody["top_k"], "top_k"); got != float64(topK) {
+		t.Fatalf("top_k=%v, want %d", got, topK)
+	}
+	stopValues, ok := requestBody["stop"].([]any)
+	if !ok || len(stopValues) != 2 {
+		t.Fatalf("stop=%T %#v, want 2 stop values", requestBody["stop"], requestBody["stop"])
+	}
+}
+
 func captureChatRequest(t *testing.T, invoke func(*Client) error) map[string]any {
+	t.Helper()
+	return captureChatRequestWithSettings(t, config.ChatSettings{Temperature: 0.1}, invoke)
+}
+
+func captureChatRequestWithSettings(t *testing.T, settings config.ChatSettings, invoke func(*Client) error) map[string]any {
 	t.Helper()
 
 	type capturedRequest struct {
@@ -91,7 +148,7 @@ func captureChatRequest(t *testing.T, invoke func(*Client) error) map[string]any
 	}))
 	defer server.Close()
 
-	client := New(server.URL, "test-token", "test-model", 256, time.Second)
+	client := New(server.URL, "test-token", "test-model", 256, time.Second, settings)
 	if err := invoke(client); err != nil {
 		t.Fatalf("chat call failed: %v", err)
 	}
@@ -102,6 +159,16 @@ func captureChatRequest(t *testing.T, invoke func(*Client) error) map[string]any
 		t.Fatalf("path=%q, want %q", captured.path, "/v1/chat/completions")
 	}
 	return captured.body
+}
+
+func requireFloat64(t *testing.T, value any, field string) float64 {
+	t.Helper()
+
+	number, ok := value.(float64)
+	if !ok {
+		t.Fatalf("%s=%T, want float64", field, value)
+	}
+	return number
 }
 
 func requireMap(t *testing.T, value any, field string) map[string]any {

@@ -71,19 +71,56 @@ type ModeModels struct {
 	UltraModel string `toml:"ultra_model,omitempty"`
 }
 
+// LMDPreflight controls the optional LMD-specific load estimate/preload step.
+type LMDPreflight struct {
+	Enabled *bool `toml:"enabled,omitempty"`
+	Preload *bool `toml:"preload,omitempty"`
+}
+
+// IsEnabled reports whether LMD preflight is explicitly enabled.
+func (p LMDPreflight) IsEnabled() bool {
+	return p.Enabled != nil && *p.Enabled
+}
+
+// ShouldPreload reports whether the preflight should also preload the model.
+func (p LMDPreflight) ShouldPreload() bool {
+	return p.Preload != nil && *p.Preload
+}
+
+// ChatSettings holds standard OpenAI-compatible inference settings.
+type ChatSettings struct {
+	Temperature      float64
+	TopP             *float64
+	TopK             *int
+	PresencePenalty  *float64
+	FrequencyPenalty *float64
+	RepeatPenalty    *float64
+	Seed             *int64
+	Stop             []string
+}
+
 // OpenAICompat holds connection and model settings.
 // Works with any OpenAI-compatible endpoint: lmd, LM Studio, ollama, OpenAI, etc.
 type OpenAICompat struct {
-	URL               string `toml:"url"`
-	Token             string `toml:"token"`
-	QuickModel        string `toml:"quick_model"`
-	FastModel         string `toml:"fast_model"`
-	DeepModel         string `toml:"deep_model"`
-	UltraModel        string `toml:"ultra_model"`
-	ContextLength     int    `toml:"context_length,omitempty"`      // tokens used to size review snapshots and chunks
-	MaxResponseTokens int    `toml:"max_response_tokens,omitempty"` // max response tokens per request (default 8192)
-	ChunkParallelism  int    `toml:"chunk_parallelism,omitempty"`   // parallel chunk reviews for large repos (default 1)
-	RequestTimeoutSec int    `toml:"request_timeout_seconds,omitempty"`
+	URL               string       `toml:"url"`
+	Token             string       `toml:"token"`
+	QuickModel        string       `toml:"quick_model"`
+	FastModel         string       `toml:"fast_model"`
+	DeepModel         string       `toml:"deep_model"`
+	UltraModel        string       `toml:"ultra_model"`
+	ContextLength     int          `toml:"context_length,omitempty"`      // tokens used to size review snapshots and chunks
+	MaxResponseTokens int          `toml:"max_response_tokens,omitempty"` // max response tokens per request (default 8192)
+	ChunkParallelism  int          `toml:"chunk_parallelism,omitempty"`   // parallel chunk reviews for large repos (default 1)
+	RequestTimeoutSec int          `toml:"request_timeout_seconds,omitempty"`
+	Temperature       *float64     `toml:"temperature,omitempty"`
+	TopP              *float64     `toml:"top_p,omitempty"`
+	TopK              *int         `toml:"top_k,omitempty"`
+	PresencePenalty   *float64     `toml:"presence_penalty,omitempty"`
+	FrequencyPenalty  *float64     `toml:"frequency_penalty,omitempty"`
+	RepeatPenalty     *float64     `toml:"repeat_penalty,omitempty"`
+	Seed              *int64       `toml:"seed,omitempty"`
+	Stop              []string     `toml:"stop,omitempty"`
+	LMDPreflight      LMDPreflight `toml:"lmd_preflight,omitempty"`
 
 	// Per-mode overrides. Falls back to FastModel/DeepModel if not set.
 	Diff ModeModels `toml:"diff,omitempty"`
@@ -121,6 +158,51 @@ func (l OpenAICompat) ResolveRequestTimeout() time.Duration {
 		return time.Duration(l.RequestTimeoutSec) * time.Second
 	}
 	return 5 * time.Minute
+}
+
+// ResolveChatSettings returns the configured chat generation settings.
+func (l OpenAICompat) ResolveChatSettings() ChatSettings {
+	settings := ChatSettings{
+		Temperature:      0.1,
+		TopP:             nil,
+		TopK:             nil,
+		PresencePenalty:  nil,
+		FrequencyPenalty: nil,
+		RepeatPenalty:    nil,
+		Seed:             nil,
+		Stop:             nil,
+	}
+	if l.Temperature != nil {
+		settings.Temperature = *l.Temperature
+	}
+	if l.TopP != nil {
+		value := *l.TopP
+		settings.TopP = &value
+	}
+	if l.TopK != nil {
+		value := *l.TopK
+		settings.TopK = &value
+	}
+	if l.PresencePenalty != nil {
+		value := *l.PresencePenalty
+		settings.PresencePenalty = &value
+	}
+	if l.FrequencyPenalty != nil {
+		value := *l.FrequencyPenalty
+		settings.FrequencyPenalty = &value
+	}
+	if l.RepeatPenalty != nil {
+		value := *l.RepeatPenalty
+		settings.RepeatPenalty = &value
+	}
+	if l.Seed != nil {
+		value := *l.Seed
+		settings.Seed = &value
+	}
+	if len(l.Stop) > 0 {
+		settings.Stop = append([]string{}, l.Stop...)
+	}
+	return settings
 }
 
 // ResolveRepoMaxBytes returns the max bytes of source to send for a repo review.

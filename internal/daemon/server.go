@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -28,6 +29,7 @@ import (
 	"goodkind.io/lm-review/internal/lmstudio"
 	"goodkind.io/lm-review/internal/requestmeta"
 	"goodkind.io/lm-review/internal/review"
+	"goodkind.io/lm-review/internal/tokenutil"
 	"goodkind.io/lm-review/internal/xdg"
 )
 
@@ -113,7 +115,45 @@ func (s *Server) buildClient(scope string, depth string, modelOverride string) (
 		model,
 		s.cfg.OpenAICompat.ResolveMaxResponseTokens(),
 		s.cfg.OpenAICompat.ResolveRequestTimeout(),
+		s.cfg.OpenAICompat.ResolveChatSettings(),
 	), model
+}
+
+func (s *Server) maybePreflightLMD(ctx context.Context, model string) error {
+	if !s.cfg.OpenAICompat.LMDPreflight.IsEnabled() {
+		gklog.LoggerFromContext(ctx).DebugContext(ctx, "review.preflight.skipped", "reason", "disabled")
+		return nil
+	}
+
+	request := lmstudio.LMDLoadRequest{
+		Model:          model,
+		ContextLength:  s.cfg.OpenAICompat.ResolveContextLength(),
+		EstimateOnly:   true,
+		EchoLoadConfig: true,
+	}
+	response, err := lmstudio.PreflightLoad(ctx, s.cfg.OpenAICompat.URL, s.cfg.OpenAICompat.Token, request)
+	if err != nil {
+		gklog.LoggerFromContext(ctx).ErrorContext(ctx, "review.preflight.estimate_failed", "model", model, "err", err)
+		return errors.New("estimate model load failed: " + err.Error())
+	}
+	gklog.LoggerFromContext(ctx).InfoContext(ctx, "review.preflight.estimated",
+		"model", model,
+		"context_length", request.ContextLength,
+		"status", response.Status,
+		"can_load", response.CanLoad,
+		"estimated_total_memory_gb", response.EstimatedTotalMemoryGB)
+	if response.CanLoad != nil && !*response.CanLoad {
+		return fmt.Errorf("model cannot load within current LMD budget")
+	}
+	if s.cfg.OpenAICompat.LMDPreflight.ShouldPreload() {
+		request.EstimateOnly = false
+		if _, err := lmstudio.PreflightLoad(ctx, s.cfg.OpenAICompat.URL, s.cfg.OpenAICompat.Token, request); err != nil {
+			gklog.LoggerFromContext(ctx).ErrorContext(ctx, "review.preflight.load_failed", "model", model, "err", err)
+			return errors.New("preload model failed: " + err.Error())
+		}
+		gklog.LoggerFromContext(ctx).InfoContext(ctx, "review.preflight.loaded", "model", model)
+	}
+	return nil
 }
 
 type preparedReviewInput struct {
@@ -124,6 +164,42 @@ type preparedReviewInput struct {
 	inputSplitter   review.InputSplitter
 	selectedFiles   []string
 	selectedModeLog string
+}
+
+type reviewChunkPlan struct {
+	chunkBytes           int
+	chunkTokenBudget     int
+	promptOverheadTokens int
+	estimatedInputTokens int
+	contextLength        int
+}
+
+func buildReviewChunkPlan(cfg config.OpenAICompat, prepared *preparedReviewInput, rules []string, buildPrompt review.PromptBuilder) reviewChunkPlan {
+	systemPrompt := buildPrompt(rules)
+	fullPrompt := prepared.fullPrompt("")
+	chunkPrompt := prepared.chunkPrompt("", 1, 1)
+	fullTokens := tokenutil.EstimateTokens(systemPrompt) + tokenutil.EstimateTokens(fullPrompt)
+	chunkTokens := tokenutil.EstimateTokens(systemPrompt) + tokenutil.EstimateTokens(chunkPrompt)
+	overheadTokens := max(fullTokens, chunkTokens)
+
+	contextLength := cfg.ResolveContextLength()
+	availableTokens := max(contextLength-cfg.ResolveMaxResponseTokens()-256, 256)
+	chunkTokenBudget := max(availableTokens-overheadTokens, 256)
+
+	chunkBytes := cfg.ResolveReviewChunkBytes()
+	tokenBoundBytes := tokenutil.BytesForTokens(chunkTokenBudget)
+	if tokenBoundBytes > 0 && tokenBoundBytes < chunkBytes {
+		chunkBytes = tokenBoundBytes
+	}
+	chunkBytes = max(chunkBytes, 1024)
+
+	return reviewChunkPlan{
+		chunkBytes:           chunkBytes,
+		chunkTokenBudget:     chunkTokenBudget,
+		promptOverheadTokens: overheadTokens,
+		estimatedInputTokens: tokenutil.EstimateTokens(prepared.input),
+		contextLength:        contextLength,
+	}
 }
 
 func (s *Server) runReview(ctx context.Context, req *reviewpb.ReviewRequest) (*reviewpb.ReviewResponse, error) {
@@ -153,7 +229,10 @@ func (s *Server) runReview(ctx context.Context, req *reviewpb.ReviewRequest) (*r
 		}, nil
 	}
 
-	chunkBytes := s.cfg.OpenAICompat.ResolveReviewChunkBytes()
+	cfg := s.reviewConfig(req.GetPath(), prepared.scope)
+	rules := filteredRules(cfg, prepared.selectedFiles)
+	buildPrompt := promptBuilderForDepth(depth)
+	chunkPlan := buildReviewChunkPlan(s.cfg.OpenAICompat, prepared, rules, buildPrompt)
 	ctx = requestmeta.With(ctx, requestmeta.Metadata{
 		ReviewID:   reviewID,
 		Scope:      prepared.scope,
@@ -162,22 +241,26 @@ func (s *Server) runReview(ctx context.Context, req *reviewpb.ReviewRequest) (*r
 		ChunkIndex: 0,
 		ChunkTotal: 0,
 	})
-	s.logPreparedInput(ctx, req.GetPath(), depth, chunkBytes, prepared)
+	s.logPreparedInput(ctx, req.GetPath(), depth, chunkPlan, prepared)
 
 	client, model := s.buildClient(prepared.scope, depth, req.GetModel())
 	log.InfoContext(ctx, "review.chat.configured",
 		"review_id", reviewID,
 		"provider", s.cfg.ResolveProvider(),
 		"model", model,
+		"context_length", chunkPlan.contextLength,
+		"prompt_overhead_tokens", chunkPlan.promptOverheadTokens,
+		"chunk_token_budget", chunkPlan.chunkTokenBudget,
 		"chunk_parallelism", s.cfg.OpenAICompat.ResolveChunkParallelism(),
 		"request_timeout_ms", s.cfg.OpenAICompat.ResolveRequestTimeout().Milliseconds(),
 		"max_response_tokens", s.cfg.OpenAICompat.ResolveMaxResponseTokens())
 
-	cfg := s.reviewConfig(req.GetPath(), prepared.scope)
-	rules := filteredRules(cfg, prepared.selectedFiles)
-	buildPrompt := promptBuilderForDepth(depth)
+	if err := s.maybePreflightLMD(ctx, model); err != nil {
+		log.ErrorContext(ctx, "review.preflight.failed", "review_id", reviewID, "err", err)
+		return nil, fmt.Errorf("LMD preflight failed: %w", err)
+	}
 
-	result, err := executeReview(ctx, client, prepared, rules, buildPrompt, chunkBytes, s.cfg.OpenAICompat.ResolveChunkParallelism())
+	result, err := executeReview(ctx, client, prepared, rules, buildPrompt, chunkPlan.chunkBytes, s.cfg.OpenAICompat.ResolveChunkParallelism())
 	model = s.verifyUltra(ctx, depth, model, result, prepared)
 
 	latency := time.Since(start).Milliseconds()
@@ -196,8 +279,8 @@ func (s *Server) runReview(ctx context.Context, req *reviewpb.ReviewRequest) (*r
 	return reviewResponseFromResult(result, model, latency), nil
 }
 
-func (s *Server) logPreparedInput(ctx context.Context, repoPath string, depth string, chunkBytes int, prepared *preparedReviewInput) {
-	chunks := prepared.inputSplitter(prepared.input, chunkBytes)
+func (s *Server) logPreparedInput(ctx context.Context, repoPath string, depth string, plan reviewChunkPlan, prepared *preparedReviewInput) {
+	chunks := prepared.inputSplitter(prepared.input, plan.chunkBytes)
 	log := gklog.LoggerFromContext(ctx).With("component", "lm-review", "subcomponent", "daemon")
 	log.InfoContext(ctx, "review.input.loaded",
 		"review_id", requestmeta.From(ctx).ReviewID,
@@ -206,8 +289,12 @@ func (s *Server) logPreparedInput(ctx context.Context, repoPath string, depth st
 		"path", repoPath,
 		"depth", depth,
 		"input_bytes", len(prepared.input),
+		"estimated_input_tokens", plan.estimatedInputTokens,
 		"file_count", len(prepared.selectedFiles),
-		"chunk_bytes", chunkBytes,
+		"context_length", plan.contextLength,
+		"prompt_overhead_tokens", plan.promptOverheadTokens,
+		"chunk_token_budget", plan.chunkTokenBudget,
+		"chunk_bytes", plan.chunkBytes,
 		"chunk_count", len(chunks))
 }
 

@@ -7,6 +7,20 @@ url        = "http://localhost:5400"  # lmd by default, or another OpenAI-compat
 token      = ""                        # API token
 fast_model = ""                        # Global fallback fast model
 deep_model = ""                        # Global fallback deep model
+context_length = 32768
+max_response_tokens = 8192
+temperature = 0.1
+# top_p = 0.95
+# top_k = 40
+# presence_penalty = 0.0
+# frequency_penalty = 0.0
+# repeat_penalty = 1.05
+# seed = 7
+# stop = ["DONE"]
+
+[openai_compat.lmd_preflight]
+enabled = false
+preload = false
 
 # Per-mode model overrides. Falls back to fast_model/deep_model if not set.
 [openai_compat.diff]

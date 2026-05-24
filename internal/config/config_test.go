@@ -36,3 +36,52 @@ func TestResolveRequestTimeout(t *testing.T) {
 		t.Fatalf("configured timeout=%s, want 12s", got)
 	}
 }
+
+func TestResolveChatSettings(t *testing.T) {
+	topP := 0.8
+	topK := 20
+	presencePenalty := 0.4
+	frequencyPenalty := 0.5
+	repeatPenalty := 1.1
+	seed := int64(7)
+
+	cfg := OpenAICompat{
+		Temperature:      floatPtr(0),
+		TopP:             floatPtr(topP),
+		TopK:             intPtr(topK),
+		PresencePenalty:  floatPtr(presencePenalty),
+		FrequencyPenalty: floatPtr(frequencyPenalty),
+		RepeatPenalty:    floatPtr(repeatPenalty),
+		Seed:             &seed,
+		Stop:             []string{"DONE"},
+	}
+	settings := cfg.ResolveChatSettings()
+
+	if settings.Temperature != 0 {
+		t.Fatalf("temperature=%v, want 0", settings.Temperature)
+	}
+	if settings.TopP == nil || *settings.TopP != topP {
+		t.Fatalf("top_p=%v, want %v", settings.TopP, topP)
+	}
+	if settings.TopK == nil || *settings.TopK != topK {
+		t.Fatalf("top_k=%v, want %v", settings.TopK, topK)
+	}
+	if settings.PresencePenalty == nil || *settings.PresencePenalty != presencePenalty {
+		t.Fatalf("presence_penalty=%v, want %v", settings.PresencePenalty, presencePenalty)
+	}
+	if settings.FrequencyPenalty == nil || *settings.FrequencyPenalty != frequencyPenalty {
+		t.Fatalf("frequency_penalty=%v, want %v", settings.FrequencyPenalty, frequencyPenalty)
+	}
+	if settings.RepeatPenalty == nil || *settings.RepeatPenalty != repeatPenalty {
+		t.Fatalf("repeat_penalty=%v, want %v", settings.RepeatPenalty, repeatPenalty)
+	}
+	if settings.Seed == nil || *settings.Seed != seed {
+		t.Fatalf("seed=%v, want %v", settings.Seed, seed)
+	}
+	if len(settings.Stop) != 1 || settings.Stop[0] != "DONE" {
+		t.Fatalf("stop=%v, want [DONE]", settings.Stop)
+	}
+}
+
+func floatPtr(value float64) *float64 { return &value }
+func intPtr(value int) *int           { return &value }
