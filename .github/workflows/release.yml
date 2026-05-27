@@ -42,7 +42,7 @@ jobs:
           git push origin "$TAG"
 
       - name: Release via GoReleaser
-        uses: goreleaser/goreleaser-action@v7.2.1
+        uses: goreleaser/goreleaser-action@v7.2.2
         with:
           version: latest
           args: release --clean --skip=validate
