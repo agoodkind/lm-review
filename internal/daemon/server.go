@@ -67,7 +67,11 @@ func Run() error {
 		slog.Error("daemon.run.open_audit_failed", "err", err)
 		return fmt.Errorf("open audit log: %w", err)
 	}
-	defer log.Close()
+	defer func() {
+		if err := log.Close(); err != nil {
+			slog.Warn("daemon.run.close_audit_failed", "err", err)
+		}
+	}()
 
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {

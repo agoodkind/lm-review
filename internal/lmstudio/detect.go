@@ -69,7 +69,7 @@ func ListModels(ctx context.Context, baseURL, token string) ([]string, error) {
 		slog.Warn("lmstudio.list_models.http_failed", "base_url", baseURL, "err", err)
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		slog.Warn("lmstudio.list_models.unauthorized", "base_url", baseURL)

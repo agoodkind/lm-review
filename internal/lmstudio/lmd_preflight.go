@@ -53,7 +53,7 @@ func PreflightLoad(ctx context.Context, baseURL string, token string, request LM
 		gklog.LoggerFromContext(ctx).ErrorContext(ctx, "lmd.preflight.send_failed", "err", err)
 		return nil, errors.New("send LMD load request failed: " + err.Error())
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		gklog.LoggerFromContext(ctx).ErrorContext(ctx, "lmd.preflight.bad_status", "status_code", response.StatusCode)
