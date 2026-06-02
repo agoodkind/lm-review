@@ -5,11 +5,11 @@ go 1.26.3
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/mark3labs/mcp-go v0.54.1
-	github.com/openai/openai-go/v3 v3.37.0
+	github.com/openai/openai-go/v3 v3.38.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sync v0.20.0
 	golang.org/x/tools v0.45.0
-	goodkind.io/gklog v0.3.0
+	goodkind.io/gklog v0.4.2
 	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.11
 	honnef.co/go/tools v0.7.0
@@ -32,8 +32,8 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/mod v0.36.0 // indirect
-	golang.org/x/net v0.54.0 // indirect
-	golang.org/x/sys v0.44.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260420184626-e10c466a9529 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
