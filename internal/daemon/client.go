@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"time"
@@ -145,7 +146,14 @@ func startDaemon() error {
 		return err
 	}
 
-	go func() { _ = cmd.Wait() }()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("daemon.start.wait_panic", "err", fmt.Errorf("panic: %v", r))
+			}
+		}()
+		_ = cmd.Wait()
+	}()
 	return nil
 }
 
