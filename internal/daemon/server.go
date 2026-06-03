@@ -24,6 +24,7 @@ import (
 	"goodkind.io/lm-review/internal/analyzer"
 	"goodkind.io/lm-review/internal/audit"
 	"goodkind.io/lm-review/internal/claude"
+	"goodkind.io/lm-review/internal/clock"
 	"goodkind.io/lm-review/internal/config"
 	"goodkind.io/lm-review/internal/gitutil"
 	"goodkind.io/lm-review/internal/lmstudio"
@@ -207,7 +208,7 @@ func buildReviewChunkPlan(cfg config.OpenAICompat, prepared *preparedReviewInput
 }
 
 func (s *Server) runReview(ctx context.Context, req *reviewpb.ReviewRequest) (*reviewpb.ReviewResponse, error) {
-	start := time.Now()
+	start := clock.Now()
 	reviewID := newReviewID()
 	log := gklog.LoggerFromContext(ctx).With("component", "lm-review", "subcomponent", "daemon")
 	if peerInfo, ok := peer.FromContext(ctx); ok && peerInfo.Addr != nil {
@@ -229,7 +230,7 @@ func (s *Server) runReview(ctx context.Context, req *reviewpb.ReviewRequest) (*r
 		return &reviewpb.ReviewResponse{
 			Verdict:   string(review.VerdictSkip),
 			Summary:   "No changes to review.",
-			LatencyMs: time.Since(start).Milliseconds(),
+			LatencyMs: clock.Since(start).Milliseconds(),
 		}, nil
 	}
 
@@ -267,7 +268,7 @@ func (s *Server) runReview(ctx context.Context, req *reviewpb.ReviewRequest) (*r
 	result, err := executeReview(ctx, client, prepared, rules, buildPrompt, chunkPlan.chunkBytes, s.cfg.OpenAICompat.ResolveChunkParallelism())
 	model = s.verifyUltra(ctx, depth, model, result, prepared)
 
-	latency := time.Since(start).Milliseconds()
+	latency := clock.Since(start).Milliseconds()
 	if err != nil {
 		s.logReviewFailure(prepared, model, latency, err)
 		log.ErrorContext(ctx, "review.run.failed", "review_id", reviewID, "latency_ms", latency, "err", err)
@@ -316,7 +317,7 @@ func newReviewID() string {
 	if _, err := rand.Read(raw[:]); err == nil {
 		return "lmrev-" + hex.EncodeToString(raw[:])
 	}
-	return fmt.Sprintf("lmrev-%d", time.Now().UnixNano())
+	return fmt.Sprintf("lmrev-%d", clock.Now().UnixNano())
 }
 
 func (s *Server) reviewConfig(repoPath string, scope string) *config.Config {
@@ -533,7 +534,7 @@ func newDiffInput(diff string, modeLog string) *preparedReviewInput {
 }
 
 func (s *Server) runStaticReview(ctx context.Context, req *reviewpb.StaticReviewRequest) (*reviewpb.ReviewResponse, error) {
-	start := time.Now()
+	start := clock.Now()
 	reviewID := newReviewID()
 	log := gklog.LoggerFromContext(ctx).With("component", "lm-review", "subcomponent", "daemon")
 	if peerInfo, ok := peer.FromContext(ctx); ok && peerInfo.Addr != nil {
@@ -543,7 +544,7 @@ func (s *Server) runStaticReview(ctx context.Context, req *reviewpb.StaticReview
 		return &reviewpb.ReviewResponse{
 			Verdict:   string(review.VerdictSkip),
 			Summary:   "Static review is disabled in config.",
-			LatencyMs: time.Since(start).Milliseconds(),
+			LatencyMs: clock.Since(start).Milliseconds(),
 		}, nil
 	}
 
@@ -553,7 +554,7 @@ func (s *Server) runStaticReview(ctx context.Context, req *reviewpb.StaticReview
 		Files:         req.Files,
 		EnabledChecks: analyzerConfig.EnabledChecks,
 	})
-	latency := time.Since(start).Milliseconds()
+	latency := clock.Since(start).Milliseconds()
 
 	if !req.Synthesize {
 		result := rawStaticResult(findings, sourceErrs)

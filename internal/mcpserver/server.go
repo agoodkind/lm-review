@@ -16,6 +16,7 @@ import (
 	"goodkind.io/lm-review/internal/gitutil"
 	"goodkind.io/lm-review/internal/review"
 	"goodkind.io/lm-review/internal/version"
+	"goodkind.io/lm-review/internal/xdg"
 )
 
 // No client-side truncation; the daemon handles chunking based on context_length.
@@ -75,7 +76,7 @@ Runs deterministic static analysis with go vet, staticcheck, custom analyzers, a
 
 ## Configuration
 
-Config lives at ` + "`~/.config/lm-review/config.toml`" + `. Key settings:
+Config lives at ` + "`" + xdg.ConfigPath() + "`" + `. Key settings:
 - ` + "`quick_model`" + ` / ` + "`fast_model`" + ` / ` + "`deep_model`" + ` / ` + "`ultra_model`" + `: which LM Studio models to use
 - ` + "`context_length`" + `: token context window for model loading
 - ` + "`max_response_tokens`" + `: cap on response length

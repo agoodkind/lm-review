@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"goodkind.io/lm-review/internal/clock"
 	"goodkind.io/lm-review/internal/xdg"
 )
 
@@ -48,7 +49,7 @@ func New() (*Logger, error) {
 // Write appends an entry to the audit log.
 func (l *Logger) Write(entry Entry) {
 	if entry.Timestamp.IsZero() {
-		entry.Timestamp = time.Now().UTC()
+		entry.Timestamp = clock.Now().UTC()
 	}
 
 	data, err := json.Marshal(entry)

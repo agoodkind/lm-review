@@ -14,6 +14,7 @@ import (
 
 	"goodkind.io/gklog"
 	"goodkind.io/lm-review/api/reviewpb"
+	"goodkind.io/lm-review/internal/clock"
 	"goodkind.io/lm-review/internal/xdg"
 )
 
@@ -158,8 +159,8 @@ func startDaemon() error {
 }
 
 func waitForSocket(path string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	deadline := clock.Now().Add(timeout)
+	for clock.Now().Before(deadline) {
 		if _, err := os.Stat(path); err == nil {
 			return nil
 		}
