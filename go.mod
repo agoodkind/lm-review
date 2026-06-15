@@ -7,8 +7,8 @@ require (
 	github.com/mark3labs/mcp-go v0.54.1
 	github.com/openai/openai-go/v3 v3.39.0
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/sync v0.20.0
-	golang.org/x/tools v0.45.0
+	golang.org/x/sync v0.21.0
+	golang.org/x/tools v0.46.0
 	goodkind.io/gklog v0.4.4
 	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.11
@@ -31,10 +31,10 @@ require (
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20260410095643-746e56fc9e2f // indirect
-	golang.org/x/mod v0.36.0 // indirect
-	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/mod v0.37.0 // indirect
+	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 )
