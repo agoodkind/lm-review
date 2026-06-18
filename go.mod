@@ -5,7 +5,7 @@ go 1.26.4
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/mark3labs/mcp-go v0.55.0
-	github.com/openai/openai-go/v3 v3.40.0
+	github.com/openai/openai-go/v3 v3.41.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sync v0.21.0
 	golang.org/x/tools v0.46.0
