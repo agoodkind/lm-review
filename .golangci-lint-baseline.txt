@@ -1,4 +1,4 @@
-# golangci-lint: generated_at=2026-05-05T15:29:13Z
+# golangci-lint: generated_at=2026-06-20T06:29:18Z
 ../cmd/lm-review/bg.go:1:1: package-comments: should have a package comment (revive)	# golangci-lint:first_added=2026-05-05T00:59:06Z last_seen=2026-05-05T15:29:13Z
 ../cmd/lm-review/bg.go:1:9: package should have a godoc ("main") (godoclint)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
 ../cmd/lm-review/bg.go:7:1: godoc line is too long (81 > 77) (godoclint)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z

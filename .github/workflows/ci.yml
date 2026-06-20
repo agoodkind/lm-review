@@ -15,14 +15,3 @@ jobs:
     permissions:
       contents: read
       id-token: write
-
-  goreleaser-check:
-    name: GoReleaser Config Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: goreleaser/goreleaser-action@v7.2.2
-        with:
-          version: latest
-          args: check

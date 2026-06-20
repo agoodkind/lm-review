@@ -62,14 +62,14 @@ lm-review daemon          # start daemon manually (auto-started on first call)
 lm-review mcp             # start MCP stdio server for Claude Code
 ```
 
-## Makefile integration
+## Development
 
-Add to your project's Makefile:
+Use the shared `go-makefile` entry points:
 
-```makefile
-build:
-	go build ./...
-	@which lm-review > /dev/null && lm-review diff || true
+```bash
+make build
+make check
+make deploy
 ```
 
 ## MCP (Claude Code)
