@@ -17,3 +17,5 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      attestations: write
+    secrets: inherit
