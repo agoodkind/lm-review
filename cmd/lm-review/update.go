@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -32,14 +31,15 @@ func newUpdateCheckCmd() *cobra.Command {
 		Short: "Check whether a newer release is available",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
+			log := lmReviewLog(ctx)
 			result, err := selfupdate.Check(ctx, updateopts.Options(updateopts.Overrides{
 				Client:      nil,
 				InstallPath: "",
 				DryRun:      false,
-				Log:         nil,
+				Log:         log,
 			}))
 			if err != nil {
-				slog.ErrorContext(ctx, "lm-review.update.check_failed", "err", err)
+				log.ErrorContext(ctx, "lm-review.update.check_failed", "err", err)
 				return fmt.Errorf("update check: %w", err)
 			}
 			out := cmd.OutOrStdout()
@@ -63,14 +63,15 @@ func newUpdateApplyCmd() *cobra.Command {
 		Short: "Download, verify, and install the latest release",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
+			log := lmReviewLog(ctx)
 			result, err := selfupdate.Apply(ctx, updateopts.Options(updateopts.Overrides{
 				Client:      nil,
 				InstallPath: "",
 				DryRun:      dryRun,
-				Log:         nil,
+				Log:         log,
 			}))
 			if err != nil {
-				slog.ErrorContext(ctx, "lm-review.update.apply_failed", "err", err)
+				log.ErrorContext(ctx, "lm-review.update.apply_failed", "err", err)
 				return fmt.Errorf("update apply: %w", err)
 			}
 			out := cmd.OutOrStdout()
@@ -97,15 +98,16 @@ func newUpdateStatusCmd() *cobra.Command {
 		Short: "Show the last-known update state",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
+			log := lmReviewLog(ctx)
 			options := updateopts.Options(updateopts.Overrides{
 				Client:      nil,
 				InstallPath: "",
 				DryRun:      false,
-				Log:         nil,
+				Log:         log,
 			})
 			state, err := selfupdate.LoadState(options.StatePath)
 			if err != nil {
-				slog.ErrorContext(ctx, "lm-review.update.status_failed", "err", err, "path", options.StatePath)
+				log.ErrorContext(ctx, "lm-review.update.status_failed", "err", err, "path", options.StatePath)
 				return fmt.Errorf("update status: %w", err)
 			}
 			out := cmd.OutOrStdout()
