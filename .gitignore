@@ -8,3 +8,8 @@ go.work
 go.work.sum
 .env
 notarize.env
+!.golangci-lint-baseline.txt
+!.gocyclo-baseline.txt
+!.deadcode-baseline.txt
+!.staticcheck-extra-baseline.txt
+!.go-mk-applied-notices

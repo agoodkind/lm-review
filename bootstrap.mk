@@ -29,7 +29,7 @@ define _go_mk_fetch
 	elif curl -fsSL --connect-timeout 5 --max-time 10 "$(GO_MK_BASE_URL)/$(1)" -o "$(2)" 2>/dev/null && [ -s "$(2)" ]; then \
 		: ; \
 	else \
-		printf '%s\n' "error: $(1) fetch failed; no cache fallback (moratorium). Run: gh auth login" >&2; \
+		printf '%s\n' "error: $(1) fetch failed; no cache fallback (moratorium). Set GO_MK_DEV_DIR, install/authenticate gh, or check curl access to $(GO_MK_BASE_URL)" >&2; \
 		exit 1; \
 	fi
 endef

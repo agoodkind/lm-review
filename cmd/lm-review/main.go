@@ -74,6 +74,8 @@ func main() {
 	root.AddCommand(newDaemonCmd())
 	root.AddCommand(newMCPCmd())
 	root.AddCommand(newInitCmd())
+	root.AddCommand(newVersionCmd())
+	root.AddCommand(newUpdateCmd())
 
 	err := root.Execute()
 	if errors.Is(err, errBlock) {
