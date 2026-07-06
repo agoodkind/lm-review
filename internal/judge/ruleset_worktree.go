@@ -54,12 +54,13 @@ func renderWorktreeState(state WorktreeState) string {
 	builder.WriteString(state.CurrentBranch)
 	for _, worktree := range state.Worktrees {
 		builder.WriteString("\n")
-		builder.WriteString(fmt.Sprintf(
+		_, _ = fmt.Fprintf(
+			&builder,
 			"worktree path: %s, branch: %s, is_primary: %t",
 			worktree.Path,
 			worktree.Branch,
 			worktree.IsPrimary,
-		))
+		)
 	}
 	return builder.String()
 }
