@@ -25,13 +25,7 @@ The daemon serializes all backend calls and writes a structured audit trail to `
 ## Install
 
 ```bash
-go install goodkind.io/lm-review/cmd/lm-review@latest
-```
-
-Or from source:
-
-```bash
-make deploy
+curl -fsSL https://raw.githubusercontent.com/agoodkind/lm-review/main/install.sh | bash
 ```
 
 ## Config
