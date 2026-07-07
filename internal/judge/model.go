@@ -1,8 +1,10 @@
+// Package judge implements the lm-review rule judge gRPC service.
 package judge
 
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -33,9 +35,23 @@ func Complete(ctx context.Context, model string, system string, user string, max
 		model,
 		maxTokens,
 		decisionRequestTimeout,
-		config.ChatSettings{Temperature: 0},
+		config.ChatSettings{
+			Temperature:      0,
+			TopP:             nil,
+			TopK:             nil,
+			PresencePenalty:  nil,
+			FrequencyPenalty: nil,
+			RepeatPenalty:    nil,
+			Seed:             nil,
+			Stop:             nil,
+		},
 	)
-	return client.Chat(ctx, system, user)
+	content, err := client.Chat(ctx, system, user)
+	if err != nil {
+		slog.ErrorContext(ctx, "judge.complete.failed", "err", err)
+		return "", fmt.Errorf("complete judge chat: %w", err)
+	}
+	return content, nil
 }
 
 // Decide asks the judge model for a block or allow verdict.

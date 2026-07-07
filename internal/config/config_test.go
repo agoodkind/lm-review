@@ -37,6 +37,17 @@ func TestResolveRequestTimeout(t *testing.T) {
 	}
 }
 
+func TestJudgeDefaults(t *testing.T) {
+	cfg := Judge{}
+
+	if got := cfg.ResolveModel(); got != DefaultJudgeModel {
+		t.Fatalf("model=%q, want %q", got, DefaultJudgeModel)
+	}
+	if got := cfg.ResolveListenAddress(); got != DefaultJudgeListenAddress {
+		t.Fatalf("listen_address=%q, want %q", got, DefaultJudgeListenAddress)
+	}
+}
+
 func TestResolveChatSettings(t *testing.T) {
 	topP := 0.8
 	topK := 20

@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"goodkind.io/lm-review/internal/config"
 	"goodkind.io/lm-review/internal/lmstudio"
 	"goodkind.io/lm-review/internal/xdg"
 )
@@ -149,7 +150,11 @@ url        = %q
 token      = %q
 fast_model = %q
 deep_model = %q
-`, url, token, fastModel, deepModel)
+
+[judge]
+model = %q
+listen_address = %q
+`, url, token, fastModel, deepModel, config.DefaultJudgeModel, config.DefaultJudgeListenAddress)
 	writeErr := os.WriteFile(path, []byte(content), 0o600)
 	if writeErr != nil {
 		return fmt.Errorf("write file: %w", writeErr)
