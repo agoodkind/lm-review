@@ -32,7 +32,13 @@ message WorktreeState {
 }
 message Worktree { string path = 1; string branch = 2; bool is_primary = 3; }
 
-message JudgeReply { Verdict verdict = 1; string reason = 2; float confidence = 3; }
+message JudgeReply {
+  Verdict verdict = 1;
+  string reason = 2;
+  // confidence is the model's confidence in the verdict, normalized to the
+  // range [0.0, 1.0]. It defaults to 0.0 when the model does not report one.
+  float confidence = 3;
+}
 enum Verdict { VERDICT_UNSPECIFIED = 0; VERDICT_BLOCK = 1; VERDICT_ALLOW = 2; }
 
 message ListRuleSetsRequest {}
