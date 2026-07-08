@@ -19,7 +19,9 @@ Guidance for AI agents working in this repository.
 - `internal/mcpserver/` - MCP stdio server using `mark3labs/mcp-go`.
 - `internal/xdg/` - XDG path helpers.
 - `internal/audit/` - JSONL audit log at `~/.local/state/lm-review/audit.jsonl`.
+- `internal/judge/` - generic `Judge` gRPC service, rule-set registry, and lmd decision client. See `docs/judge/overview.md`.
 - `api/review.proto` - gRPC service definition.
+- `api/judgepb/judge.proto` - `Judge` gRPC service definition.
 
 ## Build and test
 
@@ -60,12 +62,7 @@ pkill -f "lm-review daemon" && rm -f $TMPDIR/lm-review/daemon.sock
 
 ## Proto
 
-If you change `api/review.proto`, regenerate with:
-
-```bash
-protoc --proto_path=api --go_out=api/reviewpb --go_opt=paths=source_relative \
-  --go-grpc_out=api/reviewpb --go-grpc_opt=paths=source_relative review.proto
-```
+If you change `api/review.proto` or `api/judgepb/judge.proto`, regenerate both with `make proto`. That target runs `protoc` for `reviewpb` and `judgepb` together, so run it rather than a single hand-written `protoc` invocation.
 
 ## LM Studio token
 
