@@ -14,9 +14,11 @@ import (
 
 	"goodkind.io/gklog"
 	"goodkind.io/lm-review/api/reviewpb"
+	"goodkind.io/lm-review/internal/config"
 	"goodkind.io/lm-review/internal/daemon"
 	"goodkind.io/lm-review/internal/github"
 	"goodkind.io/lm-review/internal/gitutil"
+	"goodkind.io/lm-review/internal/judge"
 	"goodkind.io/lm-review/internal/mcpserver"
 	"goodkind.io/lm-review/internal/version"
 	"goodkind.io/lm-review/internal/xdg"
@@ -72,6 +74,7 @@ func main() {
 	root.AddCommand(newRepoCmd())
 	root.AddCommand(newReviewCmd())
 	root.AddCommand(newDaemonCmd())
+	root.AddCommand(newJudgeCmd())
 	root.AddCommand(newMCPCmd())
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newVersionCmd())
@@ -223,6 +226,44 @@ func newDaemonCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func newJudgeCmd() *cobra.Command {
+	var listenAddress string
+	var model string
+	cmd := &cobra.Command{
+		Use:   "judge",
+		Short: "Start the lm-review judge gRPC service",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			log := lmReviewLog(cmd.Context())
+			cfg, err := config.Load()
+			if err != nil {
+				log.ErrorContext(cmd.Context(), "judge.config.load_failed", "err", err)
+				return fmt.Errorf("load config: %w", err)
+			}
+			if listenAddress == "" {
+				listenAddress = cfg.Judge.ResolveListenAddress()
+			}
+			if model == "" {
+				model = cfg.Judge.ResolveModel()
+			}
+			baseURL := cfg.OpenAICompat.URL
+			token := cfg.OpenAICompat.Token
+			log.InfoContext(cmd.Context(), "judge.serve.begin",
+				"listen_address", listenAddress,
+				"model", model,
+				"base_url", baseURL)
+			err = judge.Serve(cmd.Context(), listenAddress, model, baseURL, token)
+			if err != nil {
+				log.ErrorContext(cmd.Context(), "judge.serve.failed", "err", err)
+				return fmt.Errorf("serve judge: %w", err)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&listenAddress, "listen", "", "gRPC listen address")
+	cmd.Flags().StringVar(&model, "model", "", "Judge model ID")
+	return cmd
 }
 
 func newMCPCmd() *cobra.Command {

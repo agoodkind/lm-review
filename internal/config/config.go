@@ -12,7 +12,13 @@ import (
 	"goodkind.io/lm-review/internal/xdg"
 )
 
-const maxReviewChunkBytes = 80 * 1024
+const (
+	maxReviewChunkBytes = 80 * 1024
+	// DefaultJudgeModel is the model id used by the judge service when config omits it.
+	DefaultJudgeModel = "agentgate/agent-gate-judge"
+	// DefaultJudgeListenAddress is the gRPC listen address used by the judge service when config omits it.
+	DefaultJudgeListenAddress = "[::1]:5401"
+)
 
 // Config is the top-level configuration.
 type Config struct {
@@ -20,7 +26,30 @@ type Config struct {
 	OpenAICompat OpenAICompat `toml:"openai_compat"`
 	Claude       Claude       `toml:"claude"`
 	StaticReview StaticReview `toml:"static_review"`
+	Judge        Judge        `toml:"judge"`
 	Rules        []Rule       `toml:"rules"`
+}
+
+// Judge holds settings for the standalone judge gRPC service.
+type Judge struct {
+	Model         string `toml:"model,omitempty"`
+	ListenAddress string `toml:"listen_address,omitempty"`
+}
+
+// ResolveModel returns the configured judge model id or the default model id.
+func (j Judge) ResolveModel() string {
+	if j.Model != "" {
+		return j.Model
+	}
+	return DefaultJudgeModel
+}
+
+// ResolveListenAddress returns the configured judge listen address or the default address.
+func (j Judge) ResolveListenAddress() string {
+	if j.ListenAddress != "" {
+		return j.ListenAddress
+	}
+	return DefaultJudgeListenAddress
 }
 
 // StaticReview configures the deterministic static-analysis pipeline that backs
@@ -293,6 +322,7 @@ func Load() (*Config, error) {
 		LMStudio     OpenAICompat `toml:"lmstudio"`
 		Claude       Claude       `toml:"claude"`
 		StaticReview StaticReview `toml:"static_review"`
+		Judge        Judge        `toml:"judge"`
 		Rules        []Rule       `toml:"rules"`
 	}
 	if _, err := toml.DecodeFile(path, &raw); err != nil {
@@ -304,6 +334,7 @@ func Load() (*Config, error) {
 		OpenAICompat: raw.OpenAICompat,
 		Claude:       raw.Claude,
 		StaticReview: raw.StaticReview,
+		Judge:        raw.Judge,
 		Rules:        raw.Rules,
 	}
 	if cfg.OpenAICompat.URL == "" {
