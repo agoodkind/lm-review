@@ -66,10 +66,10 @@ The persistent `Inference.Infer` gRPC method accepts a prompt, input, caller-def
 model = "your-structured-output-model"
 listen_address = "[::1]:5401"
 # base_url = "https://inference.example.com"
-# token = "replace-with-inference-token"
+# token_file = "/absolute/path/to/inference-token"
 ```
 
-When `base_url` is omitted, inference inherits the global endpoint and token. A token-only override replaces the token on that inherited endpoint. Setting `base_url` does not inherit the global token, so configure `token` explicitly when the inference endpoint requires one. A request-level model changes only the model identifier.
+When `base_url` is omitted, inference inherits the global endpoint and token. A token-only override replaces the token on that inherited endpoint. Setting `base_url` does not inherit the global token, so configure `token_file` with an absolute owner-only file when the inference endpoint requires one. A request-level model changes only the model identifier.
 
 The context value is syntactically validated JSON and remains opaque to lm-review.
 

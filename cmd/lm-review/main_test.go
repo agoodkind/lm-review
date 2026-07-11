@@ -73,7 +73,11 @@ func TestNewInferenceServerUsesEffectiveBackendAndRequestModel(t *testing.T) {
 					Token:   test.inferenceToken,
 				},
 			}
-			server := newInferenceServer(cfg, "configured-model")
+			backend, err := cfg.Inference.ReadBackendCredential(cfg.OpenAICompat)
+			if err != nil {
+				t.Fatalf("ReadBackendCredential: %v", err)
+			}
+			server := newInferenceServer(backend, "configured-model")
 			request := &inferencepb.InferRequest{
 				Prompt:       "Classify",
 				Input:        "sample",
@@ -116,14 +120,18 @@ func TestInferenceServerErrorsAndLogsDoNotExposeCredential(t *testing.T) {
 		OpenAICompat: config.OpenAICompat{URL: "http://global.invalid", Token: "global-token"},
 		Inference:    config.Inference{BaseURL: backend.URL, Token: credential, Model: "test-model"},
 	}
-	server := newInferenceServer(cfg, cfg.Inference.ResolveModel())
+	effectiveBackend, err := cfg.Inference.ReadBackendCredential(cfg.OpenAICompat)
+	if err != nil {
+		t.Fatalf("ReadBackendCredential: %v", err)
+	}
+	server := newInferenceServer(effectiveBackend, cfg.Inference.ResolveModel())
 	request := &inferencepb.InferRequest{
 		Prompt:       "Classify",
 		Input:        "sample",
 		OutputSchema: `{"type":"object"}`,
 	}
 
-	_, err := server.Infer(ctx, request)
+	_, err = server.Infer(ctx, request)
 	if err == nil {
 		t.Fatal("Infer returned nil error, want backend failure")
 	}
@@ -147,7 +155,7 @@ func TestWriteConfigDocumentsOptionalInferenceBackendWithoutDuplicatingCredentia
 	content := string(contentBytes)
 	for _, line := range []string{
 		`# base_url = "https://inference.example.com"`,
-		`# token = "replace-with-inference-token"`,
+		`# token_file = "/absolute/path/to/inference-token"`,
 	} {
 		if !strings.Contains(content, line) {
 			t.Fatalf("config does not document %q:\n%s", line, content)

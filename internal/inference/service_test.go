@@ -123,6 +123,62 @@ func TestInferRejectsInvalidModelOutput(t *testing.T) {
 	}
 }
 
+func TestInferNormalizesBareEnumTokenForSingleFieldObject(t *testing.T) {
+	tests := []struct {
+		name       string
+		schema     string
+		output     string
+		wantOutput string
+	}{
+		{name: "case insensitive", schema: decisionSchema, output: "BLOCK", wantOutput: `{"decision":"block"}`},
+		{name: "boolean-shaped", schema: singleEnumSchema("true"), output: "true", wantOutput: `{"decision":"true"}`},
+		{name: "null-shaped", schema: singleEnumSchema("null"), output: "null", wantOutput: `{"decision":"null"}`},
+		{name: "number-shaped", schema: singleEnumSchema("123"), output: "123", wantOutput: `{"decision":"123"}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := NewServer("fallback-model", modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+				return modelOutput(test.output), nil
+			}))
+			reply, err := server.Infer(context.Background(), validRequest(test.schema))
+			if err != nil {
+				t.Fatalf("Infer returned error: %v", err)
+			}
+			if reply.GetOutputJson() != test.wantOutput {
+				t.Fatalf("output_json=%q, want %q", reply.GetOutputJson(), test.wantOutput)
+			}
+		})
+	}
+}
+
+func TestInferRejectsBareTokenOutsideSingleEnumObjectSchema(t *testing.T) {
+	tests := []struct {
+		name   string
+		schema string
+		output string
+	}{
+		{name: "unrelated schema", schema: dogSchema, output: "friendly"},
+		{name: "prose", schema: decisionSchema, output: "block because indexed"},
+		{name: "surrounding whitespace", schema: decisionSchema, output: " block\n"},
+		{name: "unknown enum", schema: decisionSchema, output: "maybe"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := NewServer("fallback-model", modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+				return modelOutput(test.output), nil
+			}))
+			_, err := server.Infer(context.Background(), validRequest(test.schema))
+			if status.Code(err) != codes.DataLoss {
+				t.Fatalf("code=%s, want data loss", status.Code(err))
+			}
+		})
+	}
+}
+
+func singleEnumSchema(value string) string {
+	return `{"type":"object","additionalProperties":false,"properties":{"decision":{"type":"string","enum":["` + value + `"]}},"required":["decision"]}`
+}
+
 func TestInferSelectsRequestModelOrFallback(t *testing.T) {
 	var models []string
 	server := NewServer("fallback-model", modelFunc(func(_ context.Context, call ModelRequest) (ModelResult, error) {

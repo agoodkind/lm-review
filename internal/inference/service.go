@@ -149,15 +149,33 @@ func (s *Server) Infer(ctx context.Context, request *inferencepb.InferRequest) (
 		return nil, modelStatusError(ctx, err)
 	}
 
-	value, err := jsonschema.UnmarshalJSON(bytes.NewReader([]byte(result.Output)))
-	if err != nil {
-		return nil, status.Error(codes.DataLoss, "model output is not valid JSON")
+	outputJSON := result.Output
+	value, parseErr := jsonschema.UnmarshalJSON(bytes.NewReader([]byte(outputJSON)))
+	validationErr := error(nil)
+	if parseErr == nil {
+		validationErr = schema.Validate(value)
 	}
-	if err := schema.Validate(value); err != nil {
-		return nil, status.Error(codes.DataLoss, "model output does not match output_schema")
+	if parseErr != nil || validationErr != nil {
+		normalizedOutput, normalized := normalizeBareEnumObjectOutput(
+			request.GetOutputSchema(), result.Output,
+		)
+		if !normalized && parseErr != nil {
+			return nil, status.Error(codes.DataLoss, "model output is not valid JSON")
+		}
+		if !normalized {
+			return nil, status.Error(codes.DataLoss, "model output does not match output_schema")
+		}
+		outputJSON = normalizedOutput
+		value, err = jsonschema.UnmarshalJSON(bytes.NewReader([]byte(outputJSON)))
+		if err != nil {
+			return nil, status.Error(codes.DataLoss, "model output is not valid JSON")
+		}
+		if err := schema.Validate(value); err != nil {
+			return nil, status.Error(codes.DataLoss, "model output does not match output_schema")
+		}
 	}
 	return &inferencepb.InferReply{
-		OutputJson: result.Output,
+		OutputJson: outputJSON,
 		Status:     inferencepb.InferenceStatus_INFERENCE_STATUS_COMPLETE,
 		Metadata: &inferencepb.InvocationMetadata{
 			RequestId:          result.RequestID,

@@ -253,12 +253,16 @@ func newInferenceCmd() *cobra.Command {
 			if model == "" {
 				model = cfg.Inference.ResolveModel()
 			}
-			effectiveBackend := cfg.Inference.ResolveBackend(cfg.OpenAICompat)
+			effectiveBackend, err := cfg.Inference.ReadBackendCredential(cfg.OpenAICompat)
+			if err != nil {
+				log.ErrorContext(cmd.Context(), "inference.backend.resolve_failed", "err", err)
+				return fmt.Errorf("resolve inference backend: %w", err)
+			}
 			log.InfoContext(cmd.Context(), "inference.serve.begin",
 				"listen_address", listenAddress,
 				"model", model,
 				"base_url", effectiveBackend.URL)
-			server := newInferenceServer(cfg, model)
+			server := newInferenceServer(effectiveBackend, model)
 			err = inference.Serve(cmd.Context(), listenAddress, server)
 			if err != nil {
 				log.ErrorContext(cmd.Context(), "inference.serve.failed", "err", err)
@@ -272,8 +276,7 @@ func newInferenceCmd() *cobra.Command {
 	return cmd
 }
 
-func newInferenceServer(cfg *config.Config, model string) *inference.Server {
-	backend := cfg.Inference.ResolveBackend(cfg.OpenAICompat)
+func newInferenceServer(backend config.OpenAICompat, model string) *inference.Server {
 	return inference.NewOpenAICompatibleServer(
 		model,
 		backend.URL,

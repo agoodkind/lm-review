@@ -155,7 +155,7 @@ deep_model = %q
 model = %q
 listen_address = %q
 # base_url = "https://inference.example.com"
-# token = "replace-with-inference-token"
+# token_file = "/absolute/path/to/inference-token"
 `, url, token, fastModel, deepModel, fastModel, config.DefaultInferenceListenAddress)
 	writeErr := os.WriteFile(path, []byte(content), 0o600)
 	if writeErr != nil {

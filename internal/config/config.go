@@ -2,9 +2,12 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -36,6 +39,7 @@ type Inference struct {
 	ListenAddress string `toml:"listen_address,omitempty"`
 	BaseURL       string `toml:"base_url,omitempty"`
 	Token         string `toml:"token,omitempty"`
+	TokenFile     string `toml:"token_file,omitempty"`
 }
 
 // ResolveModel returns the configured inference model id.
@@ -65,6 +69,39 @@ func (i Inference) ResolveBackend(global OpenAICompat) OpenAICompat {
 		backend.Token = i.Token
 	}
 	return backend
+}
+
+// ReadBackendCredential resolves the backend and reads an optional
+// owner-only token file without storing the credential in TOML.
+func (i Inference) ReadBackendCredential(global OpenAICompat) (OpenAICompat, error) {
+	backend := i.ResolveBackend(global)
+	if i.TokenFile == "" {
+		return backend, nil
+	}
+	if i.Token != "" {
+		return OpenAICompat{}, errors.New("inference token and token_file are mutually exclusive")
+	}
+	if !filepath.IsAbs(i.TokenFile) {
+		return OpenAICompat{}, errors.New("inference token_file must be an absolute path")
+	}
+	info, err := os.Stat(i.TokenFile)
+	if err != nil {
+		slog.Error("stat inference token_file failed", "err", err)
+		return OpenAICompat{}, fmt.Errorf("stat inference token_file: %w", err)
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return OpenAICompat{}, errors.New("inference token_file must not be accessible by group or other users")
+	}
+	contents, err := os.ReadFile(i.TokenFile)
+	if err != nil {
+		slog.Error("read inference token_file failed", "err", err)
+		return OpenAICompat{}, fmt.Errorf("read inference token_file: %w", err)
+	}
+	backend.Token = strings.TrimSpace(string(contents))
+	if backend.Token == "" {
+		return OpenAICompat{}, errors.New("inference token_file is empty")
+	}
+	return backend, nil
 }
 
 // StaticReview configures the deterministic static-analysis pipeline that backs

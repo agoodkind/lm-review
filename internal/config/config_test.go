@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -132,6 +134,49 @@ token = "inference-token"
 	}
 	if cfg.Inference.Token != "inference-token" {
 		t.Fatalf("token=%q, want configured token", cfg.Inference.Token)
+	}
+}
+
+func TestInferenceResolveBackendCredentialReadsTokenFile(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "adapter-token")
+	if err := os.WriteFile(tokenPath, []byte("file-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inference := Inference{
+		BaseURL:   "http://localhost:11434",
+		TokenFile: tokenPath,
+	}
+	backend, err := inference.ReadBackendCredential(OpenAICompat{Token: "global-token"})
+	if err != nil {
+		t.Fatalf("ReadBackendCredential: %v", err)
+	}
+	if backend.URL != "http://localhost:11434" || backend.Token != "file-token" {
+		t.Fatalf("backend = (%q, %q)", backend.URL, backend.Token)
+	}
+}
+
+func TestInferenceResolveBackendCredentialRejectsInvalidTokenFile(t *testing.T) {
+	insecurePath := filepath.Join(t.TempDir(), "insecure-token")
+	if err := os.WriteFile(insecurePath, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(insecurePath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name      string
+		inference Inference
+	}{
+		{name: "token and token file", inference: Inference{Token: "inline", TokenFile: "/tmp/token"}},
+		{name: "missing token file", inference: Inference{TokenFile: filepath.Join(t.TempDir(), "missing")}},
+		{name: "insecure token file", inference: Inference{TokenFile: insecurePath}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := test.inference.ReadBackendCredential(OpenAICompat{}); err == nil {
+				t.Fatal("ReadBackendCredential error = nil")
+			}
+		})
 	}
 }
 
