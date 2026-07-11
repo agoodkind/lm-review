@@ -63,6 +63,13 @@ func TestReadPIDLinesDeduplicatesAndSorts(t *testing.T) {
 	}
 }
 
+func TestReadListenerPIDsRejectsHostname(t *testing.T) {
+	_, err := readListenerPIDs(context.Background(), "localhost:5401", 0)
+	if err == nil || !strings.Contains(err.Error(), "literal IPv4 or IPv6") {
+		t.Fatalf("error=%v, want literal address requirement", err)
+	}
+}
+
 func testDependencies(
 	listenerPIDs []int,
 	healthErr error,

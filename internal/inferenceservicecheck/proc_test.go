@@ -3,6 +3,7 @@ package inferenceservicecheck
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,19 +12,71 @@ import (
 
 const procTCPHeader = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
 
-func TestReadListenerPIDsFromProcFindsIPv4AndIPv6Owners(t *testing.T) {
+func TestReadListenerPIDsFromProcMatchesConfiguredIPv4Loopback(t *testing.T) {
 	procRoot := t.TempDir()
 	writeProcTable(t, procRoot, "tcp", procTCPLine("0100007F", "1519", "0A", 4101))
 	writeProcTable(t, procRoot, "tcp6", procTCPLine(strings.Repeat("0", 31)+"1", "1519", "0A", 4102))
 	writeProcSocketOwner(t, procRoot, 41, 4101)
-	writeProcSocketOwner(t, procRoot, 82, 4102)
 
 	processIDs, err := readListenerPIDsFromProc(context.Background(), procRoot, "5401", 41)
 	if err != nil {
 		t.Fatalf("readListenerPIDsFromProc returned error: %v", err)
 	}
-	if len(processIDs) != 2 || processIDs[0] != 41 || processIDs[1] != 82 {
-		t.Fatalf("process IDs=%v, want [41 82]", processIDs)
+	if len(processIDs) != 1 || processIDs[0] != 41 {
+		t.Fatalf("process IDs=%v, want [41]", processIDs)
+	}
+}
+
+func TestReadListenerPIDsFromProcMatchesConfiguredIPv6Loopback(t *testing.T) {
+	procRoot := t.TempDir()
+	writeProcTable(t, procRoot, "tcp", procTCPLine("0100007F", "1519", "0A", 4101))
+	writeProcTable(t, procRoot, "tcp6", procTCPLine("00000000000000000000000001000000", "1519", "0A", 4102))
+	writeProcSocketOwner(t, procRoot, 82, 4102)
+
+	processIDs, err := readListenerPIDsFromProcAddress(
+		context.Background(), procRoot, netip.MustParseAddr("::1"), "5401", 82,
+	)
+	if err != nil {
+		t.Fatalf("readListenerPIDsFromProcAddress returned error: %v", err)
+	}
+	if len(processIDs) != 1 || processIDs[0] != 82 {
+		t.Fatalf("process IDs=%v, want [82]", processIDs)
+	}
+}
+
+func TestReadListenerPIDsFromProcIgnoresOtherIPv4Address(t *testing.T) {
+	procRoot := t.TempDir()
+	lines := procTCPLine("0200007F", "1519", "0A", 4101) +
+		procTCPLine("0100007F", "1519", "0A", 4102)
+	writeProcTable(t, procRoot, "tcp", lines)
+	writeProcSocketOwner(t, procRoot, 41, 4101)
+	writeProcSocketOwner(t, procRoot, 82, 4102)
+
+	processIDs, err := readListenerPIDsFromProc(context.Background(), procRoot, "5401", 82)
+	if err != nil {
+		t.Fatalf("readListenerPIDsFromProc returned error: %v", err)
+	}
+	if len(processIDs) != 1 || processIDs[0] != 82 {
+		t.Fatalf("process IDs=%v, want [82]", processIDs)
+	}
+}
+
+func TestReadListenerPIDsFromProcMatchesIPv4WildcardOnly(t *testing.T) {
+	procRoot := t.TempDir()
+	lines := procTCPLine("00000000", "1519", "0A", 4101) +
+		procTCPLine("0100007F", "1519", "0A", 4102)
+	writeProcTable(t, procRoot, "tcp", lines)
+	writeProcSocketOwner(t, procRoot, 41, 4101)
+	writeProcSocketOwner(t, procRoot, 82, 4102)
+
+	processIDs, err := readListenerPIDsFromProcAddress(
+		context.Background(), procRoot, netip.MustParseAddr("0.0.0.0"), "5401", 41,
+	)
+	if err != nil {
+		t.Fatalf("readListenerPIDsFromProcAddress returned error: %v", err)
+	}
+	if len(processIDs) != 1 || processIDs[0] != 41 {
+		t.Fatalf("process IDs=%v, want [41]", processIDs)
 	}
 }
 
@@ -171,5 +224,20 @@ func procTCPLine(address string, port string, state string, inode uint64) string
 		port,
 		state,
 		inode,
+	)
+}
+
+func readListenerPIDsFromProc(
+	ctx context.Context,
+	procRoot string,
+	port string,
+	expectedPID int,
+) ([]int, error) {
+	return readListenerPIDsFromProcAddress(
+		ctx,
+		procRoot,
+		netip.MustParseAddr("127.0.0.1"),
+		port,
+		expectedPID,
 	)
 }

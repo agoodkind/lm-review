@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -108,7 +109,7 @@ func Check(
 }
 
 func readListenerPIDs(ctx context.Context, listenAddress string, expectedPID int) ([]int, error) {
-	_, port, err := net.SplitHostPort(listenAddress)
+	host, port, err := net.SplitHostPort(listenAddress)
 	if err != nil {
 		slog.ErrorContext(ctx, "inference.service_check.address_failed", "err", err)
 		return nil, fmt.Errorf("parse listen address: %w", err)
@@ -118,6 +119,16 @@ func readListenerPIDs(ctx context.Context, listenAddress string, expectedPID int
 		return nil, fmt.Errorf("listen address has invalid port %q", port)
 	}
 	validatedPort := strconv.Itoa(portNumber)
+	localAddress, err := netip.ParseAddr(host)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"listen address host %q must be a literal IPv4 or IPv6 address",
+			host,
+		)
+	}
+	if localAddress.Zone() != "" {
+		return nil, fmt.Errorf("listen address host %q must not include an IPv6 zone", host)
+	}
 	switch operatingSystem(runtime.GOOS) {
 	case operatingSystemDarwin:
 		if _, err := exec.LookPath("lsof"); err != nil {
@@ -125,7 +136,7 @@ func readListenerPIDs(ctx context.Context, listenAddress string, expectedPID int
 		}
 		return readListenerPIDsFromLsof(ctx, validatedPort)
 	case operatingSystemLinux:
-		return readListenerPIDsFromProc(ctx, "/proc", validatedPort, expectedPID)
+		return readListenerPIDsFromProcAddress(ctx, "/proc", localAddress, validatedPort, expectedPID)
 	default:
 		return nil, fmt.Errorf("listener ownership is unsupported on %s", runtime.GOOS)
 	}
@@ -168,9 +179,10 @@ func readPIDLines(ctx context.Context, output string) ([]int, error) {
 	return processIDs, nil
 }
 
-func readListenerPIDsFromProc(
+func readListenerPIDsFromProcAddress(
 	ctx context.Context,
 	procRoot string,
+	localAddress netip.Addr,
 	port string,
 	expectedPID int,
 ) ([]int, error) {
@@ -180,9 +192,18 @@ func readListenerPIDsFromProc(
 	}
 	listenerInodes := make(map[uint64]struct{})
 	tableCount := 0
-	for _, tableName := range []string{"tcp", "tcp6"} {
+	tableNames := []string{"tcp6"}
+	if localAddress.Is4() {
+		tableNames = []string{"tcp"}
+	}
+	for _, tableName := range tableNames {
 		tablePath := filepath.Join(procRoot, "net", tableName)
-		tableInodes, readErr := readProcTCPTable(ctx, tablePath, uint16(portNumber))
+		tableInodes, readErr := readProcTCPTable(
+			ctx,
+			tablePath,
+			localAddress,
+			uint16(portNumber),
+		)
 		if readErr != nil {
 			if errors.Is(readErr, os.ErrNotExist) {
 				continue
@@ -215,6 +236,7 @@ func readListenerPIDsFromProc(
 func readProcTCPTable(
 	ctx context.Context,
 	tablePath string,
+	localAddress netip.Addr,
 	port uint16,
 ) (map[uint64]struct{}, error) {
 	file, err := os.Open(tablePath)
@@ -241,7 +263,7 @@ func readProcTCPTable(
 		if len(fields) < 10 {
 			return nil, fmt.Errorf("malformed proc TCP row %d", lineNumber)
 		}
-		_, portText, found := strings.Cut(fields[1], ":")
+		addressText, portText, found := strings.Cut(fields[1], ":")
 		if !found || strings.Contains(portText, ":") {
 			return nil, fmt.Errorf("malformed proc TCP address on row %d", lineNumber)
 		}
@@ -251,6 +273,14 @@ func readProcTCPTable(
 			return nil, fmt.Errorf("parse proc TCP port on row %d: %w", lineNumber, conversionErr)
 		}
 		if fields[3] != "0A" || uint16(rowPort) != port {
+			continue
+		}
+		rowAddress, conversionErr := parseProcAddress(ctx, addressText, localAddress.Is4())
+		if conversionErr != nil {
+			slog.ErrorContext(ctx, "inference.service_check.proc_address_failed", "row", lineNumber, "err", conversionErr)
+			return nil, fmt.Errorf("parse proc TCP address on row %d: %w", lineNumber, conversionErr)
+		}
+		if rowAddress != localAddress {
 			continue
 		}
 		inode, conversionErr := strconv.ParseUint(fields[9], 10, 64)
@@ -267,6 +297,33 @@ func readProcTCPTable(
 		return nil, fmt.Errorf("proc TCP table exceeds %d bytes", maxProcTableBytes)
 	}
 	return listenerInodes, nil
+}
+
+func parseProcAddress(ctx context.Context, value string, ipv4 bool) (netip.Addr, error) {
+	expectedBytes := 16
+	if ipv4 {
+		expectedBytes = 4
+	}
+	if len(value) != expectedBytes*2 {
+		return netip.Addr{}, fmt.Errorf("address has %d hex characters", len(value))
+	}
+	decoded := make([]byte, expectedBytes)
+	for offset := range expectedBytes {
+		byteValue, err := strconv.ParseUint(value[offset*2:offset*2+2], 16, 8)
+		if err != nil {
+			slog.ErrorContext(ctx, "inference.service_check.proc_address_byte_failed", "offset", offset, "err", err)
+			return netip.Addr{}, fmt.Errorf("decode address byte %d: %w", offset, err)
+		}
+		decoded[offset] = byte(byteValue)
+	}
+	if ipv4 {
+		slices.Reverse(decoded)
+		return netip.AddrFrom4([4]byte(decoded)), nil
+	}
+	for offset := 0; offset < len(decoded); offset += 4 {
+		slices.Reverse(decoded[offset : offset+4])
+	}
+	return netip.AddrFrom16([16]byte(decoded)), nil
 }
 
 func readProcSocketOwners(
