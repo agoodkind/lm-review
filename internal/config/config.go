@@ -398,8 +398,75 @@ func Load() (*Config, error) {
 	if cfg.Provider == "lmstudio" {
 		cfg.Provider = "openai_compat"
 	}
+	if err := resolveInferenceToken(path, &cfg.Inference); err != nil {
+		return nil, err
+	}
 
 	return &cfg, nil
+}
+
+func resolveInferenceToken(configPath string, inference *Inference) error {
+	if inference.Token != "" && inference.TokenFile != "" {
+		return errors.New("inference token and token_file are mutually exclusive")
+	}
+	if inference.TokenFile == "" {
+		return nil
+	}
+
+	tokenPath, err := resolveTokenFilePath(configPath, inference.TokenFile)
+	if err != nil {
+		return err
+	}
+	tokenInfo, err := os.Stat(tokenPath)
+	if err != nil {
+		slog.Warn("config.inference_token_file.stat_failed", "path", tokenPath, "err", err)
+		return fmt.Errorf("read inference token_file %s: %w", tokenPath, err)
+	}
+	if !tokenInfo.Mode().IsRegular() {
+		return fmt.Errorf("inference token_file must be a regular file: %s", tokenPath)
+	}
+	if tokenInfo.Mode().Perm()&0o077 != 0 {
+		return fmt.Errorf(
+			"inference token_file must not be accessible by group or other users: %s",
+			tokenPath,
+		)
+	}
+	tokenBytes, err := os.ReadFile(tokenPath)
+	if err != nil {
+		slog.Warn("config.inference_token_file.read_failed", "path", tokenPath, "err", err)
+		return fmt.Errorf("read inference token_file %s: %w", tokenPath, err)
+	}
+	token := strings.TrimSpace(string(tokenBytes))
+	if token == "" {
+		return fmt.Errorf("inference token_file is empty: %s", tokenPath)
+	}
+	inference.Token = token
+	return nil
+}
+
+func resolveTokenFilePath(configPath string, tokenFile string) (string, error) {
+	tokenPath := strings.TrimSpace(tokenFile)
+	if tokenPath == "" {
+		return "", errors.New("inference token_file path is empty")
+	}
+	if tokenPath == "~" || strings.HasPrefix(tokenPath, "~/") {
+		homeDirectory, err := os.UserHomeDir()
+		if err != nil {
+			slog.Warn("config.inference_token_file.home_failed", "err", err)
+			return "", fmt.Errorf("resolve home directory for inference token_file: %w", err)
+		}
+		if tokenPath == "~" {
+			tokenPath = homeDirectory
+		} else {
+			tokenPath = filepath.Join(homeDirectory, tokenPath[2:])
+		}
+	} else if strings.HasPrefix(tokenPath, "~") {
+		return "", errors.New("inference token_file does not support user-specific home paths")
+	}
+	if !filepath.IsAbs(tokenPath) {
+		tokenPath = filepath.Join(filepath.Dir(configPath), tokenPath)
+	}
+	return filepath.Clean(tokenPath), nil
 }
 
 // projectConfig holds only the fields allowed in a project-local .lm-review.toml.

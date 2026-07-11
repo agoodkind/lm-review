@@ -155,7 +155,8 @@ func TestWriteConfigDocumentsOptionalInferenceBackendWithoutDuplicatingCredentia
 	content := string(contentBytes)
 	for _, line := range []string{
 		`# base_url = "https://inference.example.com"`,
-		`# token_file = "/absolute/path/to/inference-token"`,
+		`# token_file = "~/.config/lm-review/inference.token"`,
+		`# token = "replace-with-inference-token"`,
 	} {
 		if !strings.Contains(content, line) {
 			t.Fatalf("config does not document %q:\n%s", line, content)
