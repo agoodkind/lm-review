@@ -10,7 +10,7 @@ Each successful reply includes generic invocation metadata. The metadata records
 
 The context value is optional JSON. lm-review preserves it as opaque data and does not interpret its keys or assign application meaning to it.
 
-Run `lm-review inference` to start the persistent listener. Configure its default model and listen address under `[inference]` in `config.toml`. When `base_url` is omitted, inference inherits the global endpoint and token. A token-only override replaces the token on that inherited endpoint. Setting `base_url` does not inherit the global token, so configure `token_file` with an absolute owner-only file when the inference endpoint requires one. A request-level model selects only the model identifier and does not change the endpoint or credential.
+Run `lm-review inference` to start the listener in the foreground. Run `make deploy-inference` to install the current binary and start the supervised user service, and run `make inference-status` to inspect it. Configure its default model and listen address under `[inference]` in `config.toml`. When `base_url` is omitted, inference inherits the global endpoint and token. A token-only override replaces the token on that inherited endpoint. Setting `base_url` does not inherit the global token, so configure `token_file` with an absolute owner-only file when the inference endpoint requires one. A request-level model selects only the model identifier and does not change the endpoint or credential.
 
 ```toml
 [inference]
