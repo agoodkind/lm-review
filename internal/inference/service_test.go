@@ -16,7 +16,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"goodkind.io/lm-review/api/inferencepb"
 )
@@ -130,7 +132,7 @@ func TestInferNormalizesBareEnumTokenForSingleFieldObject(t *testing.T) {
 		output     string
 		wantOutput string
 	}{
-		{name: "case insensitive", schema: decisionSchema, output: "BLOCK", wantOutput: `{"decision":"block"}`},
+		{name: "exact token", schema: decisionSchema, output: "block", wantOutput: `{"decision":"block"}`},
 		{name: "boolean-shaped", schema: singleEnumSchema("true"), output: "true", wantOutput: `{"decision":"true"}`},
 		{name: "null-shaped", schema: singleEnumSchema("null"), output: "null", wantOutput: `{"decision":"null"}`},
 		{name: "number-shaped", schema: singleEnumSchema("123"), output: "123", wantOutput: `{"decision":"123"}`},
@@ -161,6 +163,7 @@ func TestInferRejectsBareTokenOutsideSingleEnumObjectSchema(t *testing.T) {
 		{name: "prose", schema: decisionSchema, output: "block because indexed"},
 		{name: "surrounding whitespace", schema: decisionSchema, output: " block\n"},
 		{name: "unknown enum", schema: decisionSchema, output: "maybe"},
+		{name: "different case", schema: decisionSchema, output: "BLOCK"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -226,6 +229,7 @@ func TestInferPassesPromptInputContextAndSchema(t *testing.T) {
 		return ModelResult{
 			Output:                  `{"decision":"allow"}`,
 			RequestID:               "chatcmpl-42",
+			UpstreamResponseID:      "backend-completion-42",
 			ActualModel:             "gpt-5.4-mini-2026-07-01",
 			BackendFingerprint:      "fp_backend",
 			BackendVersion:          "backend-2026.07",
@@ -268,6 +272,18 @@ func TestInferPassesPromptInputContextAndSchema(t *testing.T) {
 	if metadata.GetRequestId() != "chatcmpl-42" || metadata.GetRequestedModel() != "gpt-5.4-mini" || metadata.GetActualModel() != "gpt-5.4-mini-2026-07-01" {
 		t.Fatalf("model metadata=%#v", metadata)
 	}
+	if got := metadataStringField(t, metadata, "upstream_response_id"); got != "backend-completion-42" {
+		t.Fatalf("upstream_response_id=%q, want backend-completion-42", got)
+	}
+	if got := metadataStringField(t, metadata, "raw_output_sha256"); got != sha256Text(`{"decision":"allow"}`) {
+		t.Fatalf("raw_output_sha256=%q", got)
+	}
+	if metadataBoolField(t, metadata, "output_normalized") {
+		t.Fatal("output_normalized=true for schema-valid backend output")
+	}
+	if got := metadataStringField(t, metadata, "normalization_kind"); got != "" {
+		t.Fatalf("normalization_kind=%q, want empty", got)
+	}
 	if metadata.GetBackendFingerprint() != "fp_backend" || metadata.GetBackendVersion() != "backend-2026.07" {
 		t.Fatalf("backend metadata=%#v", metadata)
 	}
@@ -282,6 +298,28 @@ func TestInferPassesPromptInputContextAndSchema(t *testing.T) {
 	}
 	if metadata.PromptTokens == nil || metadata.CompletionTokens == nil || metadata.TotalTokens == nil {
 		t.Fatalf("usage presence metadata=%#v", metadata)
+	}
+}
+
+func TestInferRecordsBareEnumNormalizationProvenance(t *testing.T) {
+	const rawOutput = "block"
+	server := NewServer("fallback-model", modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+		return modelOutput(rawOutput), nil
+	}))
+
+	reply, err := server.Infer(context.Background(), validRequest(decisionSchema))
+	if err != nil {
+		t.Fatalf("Infer returned error: %v", err)
+	}
+	metadata := reply.GetMetadata()
+	if !metadataBoolField(t, metadata, "output_normalized") {
+		t.Fatal("output_normalized=false, want true")
+	}
+	if got := metadataStringField(t, metadata, "normalization_kind"); got != "bare_enum_object" {
+		t.Fatalf("normalization_kind=%q, want bare_enum_object", got)
+	}
+	if got := metadataStringField(t, metadata, "raw_output_sha256"); got != sha256Text(rawOutput) {
+		t.Fatalf("raw_output_sha256=%q, want %q", got, sha256Text(rawOutput))
 	}
 }
 
@@ -380,6 +418,20 @@ func TestServeListenerRemainsAvailableForMultipleCalls(t *testing.T) {
 		}
 	}()
 	client := inferencepb.NewInferenceClient(connection)
+	healthClient := healthpb.NewHealthClient(connection)
+	healthCtx, healthCancel := context.WithTimeout(context.Background(), time.Second)
+	healthReply, healthErr := healthClient.Check(healthCtx, &healthpb.HealthCheckRequest{
+		Service: inferencepb.Inference_ServiceDesc.ServiceName,
+	})
+	healthCancel()
+	if healthErr != nil {
+		cancel()
+		t.Fatalf("health Check returned error: %v", healthErr)
+	}
+	if healthReply.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+		cancel()
+		t.Fatalf("health status=%s, want SERVING", healthReply.GetStatus())
+	}
 	for range 2 {
 		callCtx, callCancel := context.WithTimeout(context.Background(), time.Second)
 		request := validRequest(decisionSchema)
@@ -447,6 +499,32 @@ func modelOutput(output string) ModelResult {
 func sha256Text(value string) string {
 	digest := sha256.Sum256([]byte(value))
 	return fmt.Sprintf("%x", digest)
+}
+
+func metadataStringField(
+	t *testing.T,
+	metadata *inferencepb.InvocationMetadata,
+	name protoreflect.Name,
+) string {
+	t.Helper()
+	field := metadata.ProtoReflect().Descriptor().Fields().ByName(name)
+	if field == nil {
+		t.Fatalf("metadata field %q is missing", name)
+	}
+	return metadata.ProtoReflect().Get(field).String()
+}
+
+func metadataBoolField(
+	t *testing.T,
+	metadata *inferencepb.InvocationMetadata,
+	name protoreflect.Name,
+) bool {
+	t.Helper()
+	field := metadata.ProtoReflect().Descriptor().Fields().ByName(name)
+	if field == nil {
+		t.Fatalf("metadata field %q is missing", name)
+	}
+	return metadata.ProtoReflect().Get(field).Bool()
 }
 
 func int64Pointer(value int64) *int64 {

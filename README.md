@@ -57,21 +57,33 @@ lm-review inference       # start declaration-driven inference service
 lm-review mcp             # start MCP stdio server for Claude Code
 ```
 
-Run `make deploy-inference` to install the current binary and start the supervised user service. Run `make inference-status` to inspect its launchd or systemd state.
+Run `make deploy-inference` to install the current binary and start the supervised user service. Deployment refuses to restart when another process owns the configured listener, then verifies supervised PID ownership and token-free gRPC health after restart. Run `make inference-status` to inspect its launchd or systemd state.
 
 ## Inference service
 
-The persistent `Inference.Infer` gRPC method accepts a prompt, input, caller-defined JSON Schema, optional opaque JSON context, optional model override, and typed generation settings such as reasoning effort. It returns JSON only after validating the model output against the caller's schema. Each successful reply includes model identity, backend identity when available, hashes, token usage, finish reason, and latency for durable caller-side audit records.
+The persistent `Inference.Infer` gRPC method accepts a prompt, input, caller-defined JSON Schema, optional opaque JSON context, optional model override, and typed generation settings such as reasoning effort. It returns JSON only after validating the model output against the caller's schema. Each successful reply includes separate local and upstream request identities, model and backend identity when available, prompt, schema, and exact raw-output hashes, normalization provenance, token usage, finish reason, and latency for durable caller-side audit records.
 
 ```toml
 [inference]
 model = "your-structured-output-model"
 listen_address = "[::1]:5401"
 # base_url = "https://inference.example.com"
-# token_file = "/absolute/path/to/inference-token"
+# token_file = "~/.config/lm-review/inference.token"
 ```
 
-When `base_url` is omitted, inference inherits the global endpoint and token. A token-only override replaces the token on that inherited endpoint. Setting `base_url` does not inherit the global token, so configure `token_file` with an absolute owner-only file when the inference endpoint requires one. A request-level model changes only the model identifier.
+When `base_url` is omitted, inference inherits the global endpoint and token. An inference `token_file` replaces the token on that inherited endpoint without changing ordinary review credentials. Setting `base_url` does not inherit the global token, so configure `token_file` when the inference endpoint requires one. Relative file paths resolve from the lm-review config directory, and paths may start with `~/`. The token file must be a regular non-symlink file with permissions `0600`. Inline `token` remains supported as a mutually exclusive alternative. A request-level model changes only the model identifier.
+
+Create the token file without placing the token in shell history:
+
+```bash
+mkdir -p "$HOME/.config/lm-review"
+install -m 600 /dev/null "$HOME/.config/lm-review/inference.token"
+printf 'Inference token: ' >&2
+IFS= read -r -s INFERENCE_TOKEN
+printf '\n' >&2
+printf '%s\n' "$INFERENCE_TOKEN" > "$HOME/.config/lm-review/inference.token"
+unset INFERENCE_TOKEN
+```
 
 The context value is syntactically validated JSON and remains opaque to lm-review.
 

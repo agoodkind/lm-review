@@ -2,7 +2,6 @@ package inference
 
 import (
 	"encoding/json"
-	"strings"
 )
 
 type singleEnumObjectSchema struct {
@@ -32,7 +31,7 @@ func normalizeBareEnumObjectOutput(schemaJSON string, output string) (string, bo
 		return "", false
 	}
 	for _, enumValue := range property.Enum {
-		if !strings.EqualFold(output, enumValue) {
+		if output != enumValue {
 			continue
 		}
 		normalized, err := json.Marshal(map[string]string{propertyName: enumValue})

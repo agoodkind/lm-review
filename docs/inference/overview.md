@@ -2,20 +2,34 @@
 
 lm-review serves a declaration-driven `Inference` gRPC service. Each request supplies a prompt, input, output JSON Schema, optional opaque JSON context, optional model override, and optional typed generation settings.
 
-`Inference.Infer` validates the request before invoking the configured OpenAI-compatible backend. The service sends the caller's schema through strict JSON Schema `response_format`, then validates the returned JSON against the same schema before returning it. A model that returns one exact bare enum token remains compatible when the schema declares one required string enum property and rejects additional properties; lm-review wraps that token into the declared object before validation. Other non-JSON output remains an error.
+`Inference.Infer` validates the request before invoking the configured OpenAI-compatible backend. The service sends the caller's schema through strict JSON Schema `response_format`, then validates the returned JSON against the same schema before returning it. A model that returns one exact, case-sensitive bare enum token remains compatible when the schema declares one required string enum property and rejects additional properties; lm-review wraps that token into the declared object before validation. Other non-JSON output remains an error.
 
 Generation settings can select reasoning effort, a maximum completion token count, and temperature. Requests without generation options use the configured legacy chat settings and `max_tokens`. Once a caller supplies an option, the service sends the explicit settings and uses the configured response-token limit as `max_completion_tokens` when the caller omits that limit.
 
-Each successful reply includes generic invocation metadata. The metadata records request and service identity, requested and actual models, backend identity when available, prompt and schema hashes, token usage when the backend reports it, finish reason, and model-call latency. Unknown actual model identity and absent or null token usage remain unset. Callers retain the original input and output beside this metadata when they need a complete decision record.
+Each successful reply includes generic invocation metadata. The metadata records the local request ID and upstream completion ID separately, service identity, requested and actual models, backend identity when available, prompt and schema hashes, token usage when the backend reports it, finish reason, and model-call latency. It also records the SHA-256 hash of the exact raw backend output. When lm-review synthesizes schema-valid JSON from a bare enum token, `output_normalized` is true and `normalization_kind` is `bare_enum_object`; otherwise the flag is false and the kind is empty. Unknown actual model identity and absent or null token usage remain unset. Callers retain the original input and returned output beside this metadata when they need a complete decision record.
 
 The context value is optional JSON. lm-review preserves it as opaque data and does not interpret its keys or assign application meaning to it.
 
-Run `lm-review inference` to start the listener in the foreground. Run `make deploy-inference` to install the current binary and start the supervised user service, and run `make inference-status` to inspect it. Configure its default model and listen address under `[inference]` in `config.toml`. When `base_url` is omitted, inference inherits the global endpoint and token. A token-only override replaces the token on that inherited endpoint. Setting `base_url` does not inherit the global token, so configure `token_file` with an absolute owner-only file when the inference endpoint requires one. A request-level model selects only the model identifier and does not change the endpoint or credential.
+Run `lm-review inference` to start the persistent listener. Run `make deploy-inference` to install the current binary and start the supervised user service, and run `make inference-status` to inspect it. Deployment checks the configured listener before restart and stops if a process outside the supervised service owns it. After restart, deployment verifies that the service manager's process owns the listener and that the standard gRPC health service reports `SERVING`; the health request does not invoke a model. Configure the default model and listen address under `[inference]` in `config.toml`. When `base_url` is omitted, inference inherits the global endpoint and token. An inference `token_file` replaces the token on that inherited endpoint without changing ordinary review credentials. Setting `base_url` does not inherit the global token, so configure `token_file` when the inference endpoint requires one. Relative file paths resolve from the lm-review config directory, and paths may start with `~/`. The token file must be a regular non-symlink file with permissions `0600`. Inline `token` remains supported as a mutually exclusive alternative. A request-level model selects only the model identifier and does not change the endpoint or credential.
+
+The supervised listener address must use a literal IPv4 or IPv6 address without an IPv6 zone. Preflight asks the kernel to bind that exact address and closes it immediately. A failed bind is accepted only when the existing supervised PID owns the same configured address. Hostnames are rejected because their address selection can vary between preflight and service startup.
 
 ```toml
 [inference]
 model = "your-structured-output-model"
 listen_address = "[::1]:5401"
 # base_url = "https://inference.example.com"
-# token_file = "/absolute/path/to/inference-token"
+# token_file = "~/.config/lm-review/inference.token"
+```
+
+Create the token file without placing the token in shell history:
+
+```bash
+mkdir -p "$HOME/.config/lm-review"
+install -m 600 /dev/null "$HOME/.config/lm-review/inference.token"
+printf 'Inference token: ' >&2
+IFS= read -r -s INFERENCE_TOKEN
+printf '\n' >&2
+printf '%s\n' "$INFERENCE_TOKEN" > "$HOME/.config/lm-review/inference.token"
+unset INFERENCE_TOKEN
 ```

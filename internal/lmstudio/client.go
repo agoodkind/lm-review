@@ -54,6 +54,7 @@ type SchemaGenerationOptions struct {
 type ChatResult struct {
 	Content                 string
 	RequestID               string
+	UpstreamResponseID      string
 	ActualModel             string
 	BackendFingerprint      string
 	BackendVersion          string
@@ -175,6 +176,7 @@ func (c *Client) chatDetailed(
 		return ChatResult{
 			Content:                 content,
 			RequestID:               "",
+			UpstreamResponseID:      "",
 			ActualModel:             "",
 			BackendFingerprint:      "",
 			BackendVersion:          "",
@@ -206,6 +208,7 @@ func (c *Client) chatDetailed(
 	return ChatResult{
 		Content:                 content,
 		RequestID:               requestID,
+		UpstreamResponseID:      resp.ID,
 		ActualModel:             resp.Model,
 		BackendFingerprint:      backendFingerprint(resp.RawJSON()),
 		BackendVersion:          backendVersion,

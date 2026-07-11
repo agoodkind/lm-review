@@ -126,6 +126,9 @@ func TestChatSchemaDetailedSendsReasoningOptionsAndReturnsMetadata(t *testing.T)
 	if result.RequestID != "inference-test-single" || result.ActualModel != "gpt-5.4-mini-2026-07-01" {
 		t.Fatalf("result identity=%#v", result)
 	}
+	if got := result.UpstreamResponseID; got != "chatcmpl-inference" {
+		t.Fatalf("upstream response ID=%q, want chatcmpl-inference", got)
+	}
 	if result.BackendFingerprint != "fp_test" || result.BackendVersion != "backend-2026.07" {
 		t.Fatalf("result backend metadata=%#v", result)
 	}

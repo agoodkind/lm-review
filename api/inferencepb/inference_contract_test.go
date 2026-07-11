@@ -52,19 +52,23 @@ func TestInferenceWireContract(t *testing.T) {
 
 	metadataFields := File_inference_proto.Messages().ByName("InvocationMetadata").Fields()
 	wantMetadataFields := map[string]int32{
-		"request_id":          1,
-		"service_version":     2,
-		"requested_model":     3,
-		"actual_model":        4,
-		"backend_fingerprint": 5,
-		"backend_version":     6,
-		"prompt_sha256":       7,
-		"schema_sha256":       8,
-		"prompt_tokens":       9,
-		"completion_tokens":   10,
-		"total_tokens":        11,
-		"finish_reason":       12,
-		"latency_ms":          13,
+		"request_id":           1,
+		"service_version":      2,
+		"requested_model":      3,
+		"actual_model":         4,
+		"backend_fingerprint":  5,
+		"backend_version":      6,
+		"prompt_sha256":        7,
+		"schema_sha256":        8,
+		"prompt_tokens":        9,
+		"completion_tokens":    10,
+		"total_tokens":         11,
+		"finish_reason":        12,
+		"latency_ms":           13,
+		"output_normalized":    14,
+		"normalization_kind":   15,
+		"raw_output_sha256":    16,
+		"upstream_response_id": 17,
 	}
 	for name, number := range wantMetadataFields {
 		field := metadataFields.ByName(protoreflect.Name(name))
