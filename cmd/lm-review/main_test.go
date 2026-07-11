@@ -26,6 +26,9 @@ func TestRootCommandExposesInferenceWithoutJudgeAlias(t *testing.T) {
 	if command, _, err := root.Find([]string{"judge"}); err == nil && command.Name() == "judge" {
 		t.Fatalf("deprecated judge alias remains registered: %v", command)
 	}
+	if command, _, err := root.Find([]string{"inference-service-check"}); err != nil || command.Name() != "inference-service-check" {
+		t.Fatalf("find inference-service-check command=%v err=%v", command, err)
+	}
 }
 
 func TestNewInferenceServerUsesEffectiveBackendAndRequestModel(t *testing.T) {

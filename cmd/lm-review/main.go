@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -19,6 +20,7 @@ import (
 	"goodkind.io/lm-review/internal/github"
 	"goodkind.io/lm-review/internal/gitutil"
 	"goodkind.io/lm-review/internal/inference"
+	"goodkind.io/lm-review/internal/inferenceservicecheck"
 	"goodkind.io/lm-review/internal/mcpserver"
 	"goodkind.io/lm-review/internal/version"
 	"goodkind.io/lm-review/internal/xdg"
@@ -87,6 +89,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newReviewCmd())
 	root.AddCommand(newDaemonCmd())
 	root.AddCommand(newInferenceCmd())
+	root.AddCommand(newInferenceServiceCheckCmd())
 	root.AddCommand(newMCPCmd())
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newVersionCmd())
@@ -284,6 +287,46 @@ func newInferenceServer(backend config.OpenAICompat, model string) *inference.Se
 		backend.ResolveRequestTimeout(),
 		backend.ResolveChatSettings(),
 	)
+}
+
+func newInferenceServiceCheckCmd() *cobra.Command {
+	var listenAddress string
+	var phase string
+	var expectedPID int
+	cmd := &cobra.Command{
+		Use:    "inference-service-check",
+		Short:  "Verify supervised inference listener ownership and health",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			log := lmReviewLog(cmd.Context())
+			if listenAddress == "" {
+				cfg, err := config.Load()
+				if err != nil {
+					log.ErrorContext(cmd.Context(), "inference.service_check.config_failed", "err", err)
+					return fmt.Errorf("load config: %w", err)
+				}
+				listenAddress = cfg.Inference.ResolveListenAddress()
+			}
+			checkContext, cancel := context.WithTimeout(cmd.Context(), 2*time.Second)
+			defer cancel()
+			if err := inferenceservicecheck.Check(
+				checkContext,
+				phase,
+				listenAddress,
+				expectedPID,
+				inferenceservicecheck.DefaultDependencies(),
+			); err != nil {
+				log.ErrorContext(cmd.Context(), "inference.service_check.failed", "phase", phase, "err", err)
+				return fmt.Errorf("inference service %s check: %w", phase, err)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&listenAddress, "listen", "", "gRPC listen address")
+	cmd.Flags().StringVar(&phase, "phase", "", "Check phase: preflight or post-restart")
+	cmd.Flags().IntVar(&expectedPID, "expected-pid", 0, "Expected supervised service PID")
+	_ = cmd.MarkFlagRequired("phase")
+	return cmd
 }
 
 func newMCPCmd() *cobra.Command {

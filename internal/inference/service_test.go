@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -417,6 +418,20 @@ func TestServeListenerRemainsAvailableForMultipleCalls(t *testing.T) {
 		}
 	}()
 	client := inferencepb.NewInferenceClient(connection)
+	healthClient := healthpb.NewHealthClient(connection)
+	healthCtx, healthCancel := context.WithTimeout(context.Background(), time.Second)
+	healthReply, healthErr := healthClient.Check(healthCtx, &healthpb.HealthCheckRequest{
+		Service: inferencepb.Inference_ServiceDesc.ServiceName,
+	})
+	healthCancel()
+	if healthErr != nil {
+		cancel()
+		t.Fatalf("health Check returned error: %v", healthErr)
+	}
+	if healthReply.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+		cancel()
+		t.Fatalf("health status=%s, want SERVING", healthReply.GetStatus())
+	}
 	for range 2 {
 		callCtx, callCancel := context.WithTimeout(context.Background(), time.Second)
 		request := validRequest(decisionSchema)

@@ -18,6 +18,8 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
 	"goodkind.io/lm-review/api/inferencepb"
@@ -299,6 +301,12 @@ func Serve(ctx context.Context, listenAddress string, server *Server) error {
 func ServeListener(ctx context.Context, listener net.Listener, server *Server) error {
 	grpcServer := grpc.NewServer()
 	inferencepb.RegisterInferenceServer(grpcServer, server)
+	healthServer := health.NewServer()
+	healthServer.SetServingStatus(
+		inferencepb.Inference_ServiceDesc.ServiceName,
+		healthpb.HealthCheckResponse_SERVING,
+	)
+	healthpb.RegisterHealthServer(grpcServer, healthServer)
 	stopped := make(chan struct{})
 	go func() {
 		defer func() {

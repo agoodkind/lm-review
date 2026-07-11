@@ -57,7 +57,7 @@ lm-review inference       # start declaration-driven inference service
 lm-review mcp             # start MCP stdio server for Claude Code
 ```
 
-Run `make deploy-inference` to install the current binary and start the supervised user service. Run `make inference-status` to inspect its launchd or systemd state.
+Run `make deploy-inference` to install the current binary and start the supervised user service. Deployment refuses to restart when another process owns the configured listener, then verifies supervised PID ownership and token-free gRPC health after restart. Run `make inference-status` to inspect its launchd or systemd state.
 
 ## Inference service
 
