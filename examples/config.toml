@@ -22,8 +22,8 @@ temperature = 0.1
 enabled = false
 preload = false
 
-[judge]
-model = "agentgate/agent-gate-judge"
+[inference]
+model = ""
 listen_address = "[::1]:5401"
 
 # Per-mode model overrides. Falls back to fast_model/deep_model if not set.

@@ -98,13 +98,18 @@ const reviewResultJSONSchema = `{
 }`
 
 func reviewResultResponseFormat() openai.ChatCompletionNewParamsResponseFormatUnion {
+	responseFormat := jsonSchemaResponseFormat("review_result", json.RawMessage(reviewResultJSONSchema))
+	responseFormat.OfJSONSchema.JSONSchema.Description = param.NewOpt("Structured review result payload.")
+	return responseFormat
+}
+
+func jsonSchemaResponseFormat(name string, schema json.RawMessage) openai.ChatCompletionNewParamsResponseFormatUnion {
 	return openai.ChatCompletionNewParamsResponseFormatUnion{
 		OfJSONSchema: &shared.ResponseFormatJSONSchemaParam{
 			JSONSchema: shared.ResponseFormatJSONSchemaJSONSchemaParam{
-				Name:        "review_result",
-				Description: param.NewOpt("Structured review result payload."),
-				Schema:      json.RawMessage(reviewResultJSONSchema),
-				Strict:      param.NewOpt(true),
+				Name:   name,
+				Schema: append(json.RawMessage(nil), schema...),
+				Strict: param.NewOpt(true),
 			},
 		},
 	}

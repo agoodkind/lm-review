@@ -10,6 +10,7 @@ Guidance for AI agents working in this repository.
 2. **gRPC daemon** (`internal/daemon/`) - long-lived process. Owns LM Studio lifecycle and audit log.
 3. **Review logic** (`internal/review/`) - prompt construction, JSON parsing, result formatting.
 4. **LM Studio client** (`internal/lmstudio/`) - HTTP API calls and `lms` CLI management.
+5. **Inference service** (`internal/inference/`) - declaration-driven structured inference over gRPC.
 
 ## Key packages
 
@@ -19,9 +20,9 @@ Guidance for AI agents working in this repository.
 - `internal/mcpserver/` - MCP stdio server using `mark3labs/mcp-go`.
 - `internal/xdg/` - XDG path helpers.
 - `internal/audit/` - JSONL audit log at `~/.local/state/lm-review/audit.jsonl`.
-- `internal/judge/` - generic `Judge` gRPC service, rule-set registry, and lmd decision client. See `docs/judge/overview.md`.
+- `internal/inference/` - generic `Inference` gRPC service and caller-supplied JSON Schema validation. See `docs/inference/overview.md`.
 - `api/review.proto` - gRPC service definition.
-- `api/judgepb/judge.proto` - `Judge` gRPC service definition.
+- `api/inferencepb/inference.proto` - `Inference` gRPC service definition.
 
 ## Build and test
 
@@ -43,6 +44,7 @@ Never run `go build` or `go test` directly. Always use `make`.
 - The daemon auto-starts on first `daemon.Connect()` call. Tests should kill and clean the socket.
 - `result.go` is the canonical review output type. The proto `ReviewResponse` is only for gRPC transport - convert at the daemon boundary.
 - MCP tool handlers must return friendly text on error, never hard error results.
+- Inference prompts, inputs, contexts, schemas, outputs, tokens, and backend response bodies must never appear in logs or errors.
 
 ## MCP tools
 
@@ -62,7 +64,7 @@ pkill -f "lm-review daemon" && rm -f $TMPDIR/lm-review/daemon.sock
 
 ## Proto
 
-If you change `api/review.proto` or `api/judgepb/judge.proto`, regenerate both with `make proto`. That target runs `protoc` for `reviewpb` and `judgepb` together, so run it rather than a single hand-written `protoc` invocation.
+If you change `api/review.proto` or `api/inferencepb/inference.proto`, regenerate both with `make proto`. That target runs `protoc` for `reviewpb` and `inferencepb` together, so run it rather than a single hand-written `protoc` invocation.
 
 ## LM Studio token
 

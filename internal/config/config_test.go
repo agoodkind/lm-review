@@ -1,8 +1,12 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestResolveReviewChunkBytesCapsLargeContext(t *testing.T) {
@@ -37,14 +41,142 @@ func TestResolveRequestTimeout(t *testing.T) {
 	}
 }
 
-func TestJudgeDefaults(t *testing.T) {
-	cfg := Judge{}
+func TestInferenceDefaults(t *testing.T) {
+	cfg := Inference{}
 
-	if got := cfg.ResolveModel(); got != DefaultJudgeModel {
-		t.Fatalf("model=%q, want %q", got, DefaultJudgeModel)
+	if got := cfg.ResolveModel(); got != DefaultInferenceModel {
+		t.Fatalf("model=%q, want %q", got, DefaultInferenceModel)
 	}
-	if got := cfg.ResolveListenAddress(); got != DefaultJudgeListenAddress {
-		t.Fatalf("listen_address=%q, want %q", got, DefaultJudgeListenAddress)
+	if got := cfg.ResolveListenAddress(); got != DefaultInferenceListenAddress {
+		t.Fatalf("listen_address=%q, want %q", got, DefaultInferenceListenAddress)
+	}
+}
+
+func TestInferenceResolveBackend(t *testing.T) {
+	global := OpenAICompat{
+		URL:               "https://global.example.test",
+		Token:             "global-token",
+		FastModel:         "global-model",
+		MaxResponseTokens: 4096,
+	}
+	tests := []struct {
+		name      string
+		inference Inference
+		wantURL   string
+		wantToken string
+	}{
+		{
+			name:      "inherits global backend",
+			inference: Inference{},
+			wantURL:   global.URL,
+			wantToken: global.Token,
+		},
+		{
+			name:      "overrides base URL without inheriting token",
+			inference: Inference{BaseURL: "https://inference.example.test"},
+			wantURL:   "https://inference.example.test",
+			wantToken: "",
+		},
+		{
+			name:      "overrides token only",
+			inference: Inference{Token: "inference-token"},
+			wantURL:   global.URL,
+			wantToken: "inference-token",
+		},
+		{
+			name: "overrides base URL and token",
+			inference: Inference{
+				BaseURL: "https://inference.example.test",
+				Token:   "inference-token",
+			},
+			wantURL:   "https://inference.example.test",
+			wantToken: "inference-token",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			backend := test.inference.ResolveBackend(global)
+
+			if backend.URL != test.wantURL {
+				t.Fatalf("url=%q, want %q", backend.URL, test.wantURL)
+			}
+			if backend.Token != test.wantToken {
+				t.Fatalf("token=%q, want configured token", backend.Token)
+			}
+			if backend.FastModel != global.FastModel {
+				t.Fatalf("fast_model=%q, want %q", backend.FastModel, global.FastModel)
+			}
+			if backend.MaxResponseTokens != global.MaxResponseTokens {
+				t.Fatalf(
+					"max_response_tokens=%d, want %d",
+					backend.MaxResponseTokens,
+					global.MaxResponseTokens,
+				)
+			}
+		})
+	}
+}
+
+func TestInferenceTOMLDecodesBaseURL(t *testing.T) {
+	var cfg struct {
+		Inference Inference `toml:"inference"`
+	}
+	_, err := toml.Decode(`[inference]
+base_url = "https://inference.example.test"
+token = "inference-token"
+`, &cfg)
+	if err != nil {
+		t.Fatalf("decode TOML: %v", err)
+	}
+	if cfg.Inference.BaseURL != "https://inference.example.test" {
+		t.Fatalf("base_url=%q, want configured URL", cfg.Inference.BaseURL)
+	}
+	if cfg.Inference.Token != "inference-token" {
+		t.Fatalf("token=%q, want configured token", cfg.Inference.Token)
+	}
+}
+
+func TestInferenceResolveBackendCredentialReadsTokenFile(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "adapter-token")
+	if err := os.WriteFile(tokenPath, []byte("file-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inference := Inference{
+		BaseURL:   "http://localhost:11434",
+		TokenFile: tokenPath,
+	}
+	backend, err := inference.ReadBackendCredential(OpenAICompat{Token: "global-token"})
+	if err != nil {
+		t.Fatalf("ReadBackendCredential: %v", err)
+	}
+	if backend.URL != "http://localhost:11434" || backend.Token != "file-token" {
+		t.Fatalf("backend = (%q, %q)", backend.URL, backend.Token)
+	}
+}
+
+func TestInferenceResolveBackendCredentialRejectsInvalidTokenFile(t *testing.T) {
+	insecurePath := filepath.Join(t.TempDir(), "insecure-token")
+	if err := os.WriteFile(insecurePath, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(insecurePath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name      string
+		inference Inference
+	}{
+		{name: "token and token file", inference: Inference{Token: "inline", TokenFile: "/tmp/token"}},
+		{name: "missing token file", inference: Inference{TokenFile: filepath.Join(t.TempDir(), "missing")}},
+		{name: "insecure token file", inference: Inference{TokenFile: insecurePath}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := test.inference.ReadBackendCredential(OpenAICompat{}); err == nil {
+				t.Fatal("ReadBackendCredential error = nil")
+			}
+		})
 	}
 }
 

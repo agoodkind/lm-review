@@ -151,10 +151,12 @@ token      = %q
 fast_model = %q
 deep_model = %q
 
-[judge]
+[inference]
 model = %q
 listen_address = %q
-`, url, token, fastModel, deepModel, config.DefaultJudgeModel, config.DefaultJudgeListenAddress)
+# base_url = "https://inference.example.com"
+# token_file = "/absolute/path/to/inference-token"
+`, url, token, fastModel, deepModel, fastModel, config.DefaultInferenceListenAddress)
 	writeErr := os.WriteFile(path, []byte(content), 0o600)
 	if writeErr != nil {
 		return fmt.Errorf("write file: %w", writeErr)

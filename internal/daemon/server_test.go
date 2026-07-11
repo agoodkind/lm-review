@@ -2,6 +2,9 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,6 +64,53 @@ func TestOpenAICompatBuildClientUsesConfiguredEndpoint(t *testing.T) {
 	}
 	if model != "missing-test-model" {
 		t.Fatalf("model=%q, want missing-test-model", model)
+	}
+}
+
+func TestOpenAICompatBuildClientIgnoresInferenceBackendOverride(t *testing.T) {
+	var authorization string
+	var requestBody map[string]any
+	globalBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		authorization = request.Header.Get("Authorization")
+		if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-review","object":"chat.completion","created":0,"model":"global-model","choices":[{"index":0,"message":{"role":"assistant","content":"{\"verdict\":\"pass\",\"summary\":\"ok\",\"issues\":[]}"},"finish_reason":"stop"}]}`))
+	}))
+	defer globalBackend.Close()
+
+	var inferenceCalls int
+	inferenceBackend := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		inferenceCalls++
+	}))
+	defer inferenceBackend.Close()
+
+	server := &Server{cfg: &config.Config{
+		OpenAICompat: config.OpenAICompat{
+			URL:       globalBackend.URL,
+			Token:     "global-token",
+			FastModel: "global-model",
+		},
+		Inference: config.Inference{
+			BaseURL: inferenceBackend.URL,
+			Token:   "inference-token",
+		},
+	}}
+	client, _ := server.buildClient("diff", "normal", "")
+
+	if _, err := client.Chat(context.Background(), "system", "input"); err != nil {
+		t.Fatalf("Chat returned error: %v", err)
+	}
+	if inferenceCalls != 0 {
+		t.Fatalf("inference backend calls=%d, want 0", inferenceCalls)
+	}
+	if authorization != "Bearer global-token" {
+		t.Fatalf("authorization=%q, want global credential", authorization)
+	}
+	if requestBody["model"] != "global-model" {
+		t.Fatalf("model=%v, want global-model", requestBody["model"])
 	}
 }
 
