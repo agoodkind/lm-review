@@ -26,7 +26,10 @@ import (
 	"goodkind.io/lm-review/internal/version"
 )
 
-const schemaResourceURL = "urn:lm-review:inference-output"
+const (
+	schemaResourceURL               = "urn:lm-review:inference-output"
+	bareEnumObjectNormalizationKind = "bare_enum_object"
+)
 
 var errInvalidSchema = errors.New("invalid JSON Schema")
 
@@ -51,6 +54,7 @@ type GenerationOptions struct {
 type ModelResult struct {
 	Output                  string
 	RequestID               string
+	UpstreamResponseID      string
 	ActualModel             string
 	BackendFingerprint      string
 	BackendVersion          string
@@ -150,6 +154,8 @@ func (s *Server) Infer(ctx context.Context, request *inferencepb.InferRequest) (
 	}
 
 	outputJSON := result.Output
+	outputNormalized := false
+	normalizationKind := ""
 	value, parseErr := jsonschema.UnmarshalJSON(bytes.NewReader([]byte(outputJSON)))
 	validationErr := error(nil)
 	if parseErr == nil {
@@ -166,6 +172,8 @@ func (s *Server) Infer(ctx context.Context, request *inferencepb.InferRequest) (
 			return nil, status.Error(codes.DataLoss, "model output does not match output_schema")
 		}
 		outputJSON = normalizedOutput
+		outputNormalized = true
+		normalizationKind = bareEnumObjectNormalizationKind
 		value, err = jsonschema.UnmarshalJSON(bytes.NewReader([]byte(outputJSON)))
 		if err != nil {
 			return nil, status.Error(codes.DataLoss, "model output is not valid JSON")
@@ -179,6 +187,7 @@ func (s *Server) Infer(ctx context.Context, request *inferencepb.InferRequest) (
 		Status:     inferencepb.InferenceStatus_INFERENCE_STATUS_COMPLETE,
 		Metadata: &inferencepb.InvocationMetadata{
 			RequestId:          result.RequestID,
+			UpstreamResponseId: result.UpstreamResponseID,
 			ServiceVersion:     s.serviceVersion,
 			RequestedModel:     model,
 			ActualModel:        strings.TrimSpace(result.ActualModel),
@@ -191,9 +200,12 @@ func (s *Server) Infer(ctx context.Context, request *inferencepb.InferRequest) (
 				result.CompletionTokens,
 				result.CompletionTokensPresent,
 			),
-			TotalTokens:  optionalInt64(result.TotalTokens, result.TotalTokensPresent),
-			FinishReason: result.FinishReason,
-			LatencyMs:    result.Latency.Milliseconds(),
+			TotalTokens:       optionalInt64(result.TotalTokens, result.TotalTokensPresent),
+			FinishReason:      result.FinishReason,
+			LatencyMs:         result.Latency.Milliseconds(),
+			OutputNormalized:  outputNormalized,
+			NormalizationKind: normalizationKind,
+			RawOutputSha256:   sha256Hex(result.Output),
 		},
 	}, nil
 }
@@ -387,6 +399,7 @@ func (c *openAICompatibleClient) Infer(ctx context.Context, request ModelRequest
 	return ModelResult{
 		Output:                  result.Content,
 		RequestID:               result.RequestID,
+		UpstreamResponseID:      result.UpstreamResponseID,
 		ActualModel:             result.ActualModel,
 		BackendFingerprint:      result.BackendFingerprint,
 		BackendVersion:          result.BackendVersion,

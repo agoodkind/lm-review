@@ -61,7 +61,7 @@ Run `make deploy-inference` to install the current binary and start the supervis
 
 ## Inference service
 
-The persistent `Inference.Infer` gRPC method accepts a prompt, input, caller-defined JSON Schema, optional opaque JSON context, optional model override, and typed generation settings such as reasoning effort. It returns JSON only after validating the model output against the caller's schema. Each successful reply includes model identity, backend identity when available, hashes, token usage, finish reason, and latency for durable caller-side audit records.
+The persistent `Inference.Infer` gRPC method accepts a prompt, input, caller-defined JSON Schema, optional opaque JSON context, optional model override, and typed generation settings such as reasoning effort. It returns JSON only after validating the model output against the caller's schema. Each successful reply includes separate local and upstream request identities, model and backend identity when available, prompt, schema, and exact raw-output hashes, normalization provenance, token usage, finish reason, and latency for durable caller-side audit records.
 
 ```toml
 [inference]
