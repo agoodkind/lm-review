@@ -344,7 +344,8 @@ func TestInferConcurrentCallsAreSafe(t *testing.T) {
 }
 
 func TestServeListenerRemainsAvailableForMultipleCalls(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listenConfig := net.ListenConfig{}
+	listener, err := listenConfig.Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
@@ -373,7 +374,11 @@ func TestServeListenerRemainsAvailableForMultipleCalls(t *testing.T) {
 		cancel()
 		t.Fatalf("dial: %v", err)
 	}
-	defer connection.Close()
+	defer func() {
+		if err := connection.Close(); err != nil {
+			t.Errorf("close client connection: %v", err)
+		}
+	}()
 	client := inferencepb.NewInferenceClient(connection)
 	for range 2 {
 		callCtx, callCancel := context.WithTimeout(context.Background(), time.Second)

@@ -260,8 +260,7 @@ func newInferenceCmd() *cobra.Command {
 			}
 			log.InfoContext(cmd.Context(), "inference.serve.begin",
 				"listen_address", listenAddress,
-				"model", model,
-				"base_url", effectiveBackend.URL)
+				"model", model)
 			server := newInferenceServer(effectiveBackend, model)
 			err = inference.Serve(cmd.Context(), listenAddress, server)
 			if err != nil {
