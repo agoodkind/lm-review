@@ -63,21 +63,13 @@ func TestReadPIDLinesDeduplicatesAndSorts(t *testing.T) {
 	}
 }
 
-func TestProcessIDPatternParsesSSOutput(t *testing.T) {
-	output := `LISTEN 0 4096 [::1]:5401 [::]:* users:(("lm-review",pid=82,fd=9))`
-	matches := processIDPattern.FindAllStringSubmatch(output, -1)
-	if len(matches) != 1 || matches[0][1] != "82" {
-		t.Fatalf("matches=%v, want PID 82", matches)
-	}
-}
-
 func testDependencies(
 	listenerPIDs []int,
 	healthErr error,
 	listenerErr error,
 ) Dependencies {
 	return Dependencies{
-		ListenerPIDs: func(context.Context, string) ([]int, error) {
+		ListenerPIDs: func(context.Context, string, int) ([]int, error) {
 			return listenerPIDs, listenerErr
 		},
 		CheckHealth: func(context.Context, string) error {
