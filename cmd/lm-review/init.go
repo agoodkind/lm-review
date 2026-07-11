@@ -155,7 +155,7 @@ deep_model = %q
 model = %q
 listen_address = %q
 # base_url = "https://inference.example.com"
-# token_file = "~/.config/lm-review/inference.token" # preferred
+# token_file = "~/.config/lm-review/inference.token" # preferred; regular file with mode 0600
 # token = "replace-with-inference-token"
 `, url, token, fastModel, deepModel, fastModel, config.DefaultInferenceListenAddress)
 	writeErr := os.WriteFile(path, []byte(content), 0o600)

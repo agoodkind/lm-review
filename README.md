@@ -71,7 +71,19 @@ listen_address = "[::1]:5401"
 # token_file = "~/.config/lm-review/inference.token"
 ```
 
-When `base_url` is omitted, inference inherits the global endpoint and token. An inference `token_file` replaces the token on that inherited endpoint without changing ordinary review credentials. Setting `base_url` does not inherit the global token, so configure `token_file` when the inference endpoint requires one. Relative file paths resolve from the lm-review config directory, and paths may start with `~/`. Inline `token` remains supported as a mutually exclusive alternative. A request-level model changes only the model identifier.
+When `base_url` is omitted, inference inherits the global endpoint and token. An inference `token_file` replaces the token on that inherited endpoint without changing ordinary review credentials. Setting `base_url` does not inherit the global token, so configure `token_file` when the inference endpoint requires one. Relative file paths resolve from the lm-review config directory, and paths may start with `~/`. The token file must be a regular non-symlink file with permissions `0600`. Inline `token` remains supported as a mutually exclusive alternative. A request-level model changes only the model identifier.
+
+Create the token file without placing the token in shell history:
+
+```bash
+mkdir -p "$HOME/.config/lm-review"
+install -m 600 /dev/null "$HOME/.config/lm-review/inference.token"
+printf 'Inference token: ' >&2
+IFS= read -r -s INFERENCE_TOKEN
+printf '\n' >&2
+printf '%s\n' "$INFERENCE_TOKEN" > "$HOME/.config/lm-review/inference.token"
+unset INFERENCE_TOKEN
+```
 
 The context value is syntactically validated JSON and remains opaque to lm-review.
 

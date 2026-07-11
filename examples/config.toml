@@ -26,7 +26,7 @@ preload = false
 model = ""
 listen_address = "[::1]:5401"
 # base_url = "https://inference.example.com"
-# token_file = "~/.config/lm-review/inference.token" # preferred
+# token_file = "~/.config/lm-review/inference.token" # preferred; regular file with mode 0600
 # token = "replace-with-inference-token"             # mutually exclusive alternative
 
 # Per-mode model overrides. Falls back to fast_model/deep_model if not set.

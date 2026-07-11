@@ -10,7 +10,7 @@ Each successful reply includes generic invocation metadata. The metadata records
 
 The context value is optional JSON. lm-review preserves it as opaque data and does not interpret its keys or assign application meaning to it.
 
-Run `lm-review inference` to start the persistent listener. Configure its default model and listen address under `[inference]` in `config.toml`. When `base_url` is omitted, inference inherits the global endpoint and token. An inference `token_file` replaces the token on that inherited endpoint without changing ordinary review credentials. Setting `base_url` does not inherit the global token, so configure `token_file` when the inference endpoint requires one. Relative file paths resolve from the lm-review config directory, and paths may start with `~/`. Inline `token` remains supported as a mutually exclusive alternative. A request-level model selects only the model identifier and does not change the endpoint or credential.
+Run `lm-review inference` to start the persistent listener. Configure its default model and listen address under `[inference]` in `config.toml`. When `base_url` is omitted, inference inherits the global endpoint and token. An inference `token_file` replaces the token on that inherited endpoint without changing ordinary review credentials. Setting `base_url` does not inherit the global token, so configure `token_file` when the inference endpoint requires one. Relative file paths resolve from the lm-review config directory, and paths may start with `~/`. The token file must be a regular non-symlink file with permissions `0600`. Inline `token` remains supported as a mutually exclusive alternative. A request-level model selects only the model identifier and does not change the endpoint or credential.
 
 ```toml
 [inference]
@@ -18,4 +18,16 @@ model = "your-structured-output-model"
 listen_address = "[::1]:5401"
 # base_url = "https://inference.example.com"
 # token_file = "~/.config/lm-review/inference.token"
+```
+
+Create the token file without placing the token in shell history:
+
+```bash
+mkdir -p "$HOME/.config/lm-review"
+install -m 600 /dev/null "$HOME/.config/lm-review/inference.token"
+printf 'Inference token: ' >&2
+IFS= read -r -s INFERENCE_TOKEN
+printf '\n' >&2
+printf '%s\n' "$INFERENCE_TOKEN" > "$HOME/.config/lm-review/inference.token"
+unset INFERENCE_TOKEN
 ```

@@ -253,7 +253,7 @@ func newInferenceCmd() *cobra.Command {
 			if model == "" {
 				model = cfg.Inference.ResolveModel()
 			}
-			effectiveBackend, err := cfg.Inference.ReadBackendCredential(cfg.OpenAICompat)
+			effectiveBackend, err := cfg.Inference.ResolveBackendCredential(cfg.OpenAICompat)
 			if err != nil {
 				log.ErrorContext(cmd.Context(), "inference.backend.resolve_failed", "err", err)
 				return fmt.Errorf("resolve inference backend: %w", err)

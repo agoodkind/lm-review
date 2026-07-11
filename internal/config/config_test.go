@@ -139,7 +139,7 @@ token = "inference-token"
 	}
 }
 
-func TestLoadResolvesRelativeInferenceTokenFile(t *testing.T) {
+func TestInferenceResolveBackendCredentialReadsRelativeTokenFile(t *testing.T) {
 	configPath := writeTestConfig(t, `[openai_compat]
 url = "https://global.example.test"
 token = "global-token"
@@ -160,13 +160,16 @@ token_file = "secrets/inference-token"
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if cfg.Inference.Token != "inference-token" {
-		t.Fatalf("inference token=%q, want resolved token", cfg.Inference.Token)
+	if cfg.Inference.Token != "" {
+		t.Fatalf("inference token=%q before resolution, want empty", cfg.Inference.Token)
 	}
 	if cfg.OpenAICompat.Token != "global-token" {
 		t.Fatalf("global token=%q, want unchanged global token", cfg.OpenAICompat.Token)
 	}
-	backend := cfg.Inference.ResolveBackend(cfg.OpenAICompat)
+	backend, err := cfg.Inference.ResolveBackendCredential(cfg.OpenAICompat)
+	if err != nil {
+		t.Fatalf("ResolveBackendCredential returned error: %v", err)
+	}
 	if backend.URL != "https://inference.example.test" {
 		t.Fatalf("backend URL=%q, want inference URL", backend.URL)
 	}
@@ -175,7 +178,7 @@ token_file = "secrets/inference-token"
 	}
 }
 
-func TestLoadResolvesHomeRelativeInferenceTokenFile(t *testing.T) {
+func TestInferenceResolveBackendCredentialReadsHomeRelativeTokenFile(t *testing.T) {
 	homeDirectory := t.TempDir()
 	t.Setenv("HOME", homeDirectory)
 	tokenPath := filepath.Join(homeDirectory, ".config", "lm-review", "inference.token")
@@ -193,12 +196,38 @@ token_file = "~/.config/lm-review/inference.token"
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if cfg.Inference.Token != "home-token" {
-		t.Fatalf("inference token=%q, want resolved home token", cfg.Inference.Token)
+	backend, err := cfg.Inference.ResolveBackendCredential(cfg.OpenAICompat)
+	if err != nil {
+		t.Fatalf("ResolveBackendCredential returned error: %v", err)
+	}
+	if backend.Token != "home-token" {
+		t.Fatalf("backend token=%q, want resolved home token", backend.Token)
 	}
 }
 
-func TestLoadRejectsInvalidInferenceTokenFile(t *testing.T) {
+func TestLoadDoesNotResolveInvalidInferenceTokenFile(t *testing.T) {
+	writeTestConfig(t, `[openai_compat]
+url = "https://global.example.test"
+token = "global-token"
+
+[inference]
+base_url = "https://inference.example.test"
+token_file = "missing.token"
+`)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error for unused inference credential: %v", err)
+	}
+	if cfg.OpenAICompat.Token != "global-token" {
+		t.Fatalf("global token=%q, want unchanged ordinary review token", cfg.OpenAICompat.Token)
+	}
+	if cfg.Inference.TokenFile != "missing.token" {
+		t.Fatalf("inference token_file=%q, want unresolved reference", cfg.Inference.TokenFile)
+	}
+}
+
+func TestInferenceResolveBackendCredentialRejectsInvalidTokenFile(t *testing.T) {
 	tests := []struct {
 		name         string
 		config       string
@@ -236,7 +265,7 @@ token_file = "inference.token"
 			wantError: "inference token_file must be a regular file",
 		},
 		{
-			name: "group-readable token file",
+			name: "token file without exact permissions",
 			config: `[inference]
 token_file = "inference.token"
 `,
@@ -246,7 +275,7 @@ token_file = "inference.token"
 					t.Fatalf("write group-readable token file: %v", err)
 				}
 			},
-			wantError:    "inference token_file must not be accessible by group or other users",
+			wantError:    "inference token_file must have permissions 0600",
 			secretCanary: "permission-secret-canary",
 		},
 		{
@@ -262,6 +291,24 @@ token_file = "inference.token"
 			},
 			wantError:    "read inference token_file",
 			secretCanary: "unreadable-secret-canary",
+		},
+		{
+			name: "symlink token file",
+			config: `[inference]
+token_file = "inference.token"
+`,
+			prepare: func(t *testing.T, tokenPath string) {
+				t.Helper()
+				targetPath := filepath.Join(filepath.Dir(tokenPath), "target.token")
+				if err := os.WriteFile(targetPath, []byte("symlink-secret-canary"), 0o600); err != nil {
+					t.Fatalf("write symlink target: %v", err)
+				}
+				if err := os.Symlink(targetPath, tokenPath); err != nil {
+					t.Fatalf("create token symlink: %v", err)
+				}
+			},
+			wantError:    "inference token_file must not be a symlink",
+			secretCanary: "symlink-secret-canary",
 		},
 		{
 			name: "empty token file",
@@ -289,6 +336,20 @@ token_file = "inference.token"
 			},
 			wantError: "inference token_file is empty",
 		},
+		{
+			name: "oversized token file",
+			config: `[inference]
+token_file = "inference.token"
+`,
+			prepare: func(t *testing.T, tokenPath string) {
+				t.Helper()
+				contents := bytes.Repeat([]byte("x"), maxInferenceTokenBytes+1)
+				if err := os.WriteFile(tokenPath, contents, 0o600); err != nil {
+					t.Fatalf("write oversized token file: %v", err)
+				}
+			},
+			wantError: "inference token_file exceeds maximum size",
+		},
 	}
 
 	for _, test := range tests {
@@ -298,9 +359,13 @@ token_file = "inference.token"
 				test.prepare(t, filepath.Join(filepath.Dir(configPath), "inference.token"))
 			}
 
-			_, err := Load()
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load returned error before inference resolution: %v", err)
+			}
+			_, err = cfg.Inference.ResolveBackendCredential(cfg.OpenAICompat)
 			if err == nil {
-				t.Fatal("Load returned nil error")
+				t.Fatal("ResolveBackendCredential returned nil error")
 			}
 			if !strings.Contains(err.Error(), test.wantError) {
 				t.Fatalf("error=%q, want substring %q", err, test.wantError)
@@ -309,6 +374,35 @@ token_file = "inference.token"
 				t.Fatalf("error exposes secret content: %q", err)
 			}
 		})
+	}
+}
+
+func TestReadOpenedInferenceTokenUsesOpenedDescriptor(t *testing.T) {
+	directory := t.TempDir()
+	tokenPath := filepath.Join(directory, "inference.token")
+	replacementPath := filepath.Join(directory, "replacement.token")
+	if err := os.WriteFile(tokenPath, []byte("original-token\n"), 0o600); err != nil {
+		t.Fatalf("write original token: %v", err)
+	}
+	if err := os.WriteFile(replacementPath, []byte("replacement-token\n"), 0o600); err != nil {
+		t.Fatalf("write replacement token: %v", err)
+	}
+
+	tokenFile, err := openInferenceTokenFile(tokenPath)
+	if err != nil {
+		t.Fatalf("openInferenceTokenFile returned error: %v", err)
+	}
+	defer tokenFile.Close()
+	if err := os.Rename(replacementPath, tokenPath); err != nil {
+		t.Fatalf("replace token pathname: %v", err)
+	}
+
+	token, err := readOpenedInferenceTokenFile(tokenFile, tokenPath)
+	if err != nil {
+		t.Fatalf("readOpenedInferenceTokenFile returned error: %v", err)
+	}
+	if token != "original-token" {
+		t.Fatalf("token=%q, want content from opened descriptor", token)
 	}
 }
 

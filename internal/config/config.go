@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,12 +12,14 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"golang.org/x/sys/unix"
 
 	"goodkind.io/lm-review/internal/xdg"
 )
 
 const (
-	maxReviewChunkBytes = 80 * 1024
+	maxReviewChunkBytes    = 80 * 1024
+	maxInferenceTokenBytes = 4 * 1024
 	// DefaultInferenceModel leaves model selection to explicit configuration.
 	DefaultInferenceModel = ""
 	// DefaultInferenceListenAddress is the default inference gRPC listen address.
@@ -71,36 +74,25 @@ func (i Inference) ResolveBackend(global OpenAICompat) OpenAICompat {
 	return backend
 }
 
-// ReadBackendCredential resolves the backend and reads an optional
-// owner-only token file without storing the credential in TOML.
-func (i Inference) ReadBackendCredential(global OpenAICompat) (OpenAICompat, error) {
+// ResolveBackendCredential resolves the inference backend and its optional token file.
+func (i Inference) ResolveBackendCredential(global OpenAICompat) (OpenAICompat, error) {
+	if i.Token != "" && i.TokenFile != "" {
+		return OpenAICompat{}, errors.New("inference token and token_file are mutually exclusive")
+	}
 	backend := i.ResolveBackend(global)
 	if i.TokenFile == "" {
 		return backend, nil
 	}
-	if i.Token != "" {
-		return OpenAICompat{}, errors.New("inference token and token_file are mutually exclusive")
-	}
-	if !filepath.IsAbs(i.TokenFile) {
-		return OpenAICompat{}, errors.New("inference token_file must be an absolute path")
-	}
-	info, err := os.Stat(i.TokenFile)
+
+	tokenPath, err := resolveTokenFilePath(xdg.ConfigPath(), i.TokenFile)
 	if err != nil {
-		slog.Error("stat inference token_file failed", "err", err)
-		return OpenAICompat{}, fmt.Errorf("stat inference token_file: %w", err)
+		return OpenAICompat{}, err
 	}
-	if info.Mode().Perm()&0o077 != 0 {
-		return OpenAICompat{}, errors.New("inference token_file must not be accessible by group or other users")
-	}
-	contents, err := os.ReadFile(i.TokenFile)
+	token, err := readInferenceTokenFile(tokenPath)
 	if err != nil {
-		slog.Error("read inference token_file failed", "err", err)
-		return OpenAICompat{}, fmt.Errorf("read inference token_file: %w", err)
+		return OpenAICompat{}, err
 	}
-	backend.Token = strings.TrimSpace(string(contents))
-	if backend.Token == "" {
-		return OpenAICompat{}, errors.New("inference token_file is empty")
-	}
+	backend.Token = token
 	return backend, nil
 }
 
@@ -398,50 +390,65 @@ func Load() (*Config, error) {
 	if cfg.Provider == "lmstudio" {
 		cfg.Provider = "openai_compat"
 	}
-	if err := resolveInferenceToken(path, &cfg.Inference); err != nil {
-		return nil, err
-	}
-
 	return &cfg, nil
 }
 
-func resolveInferenceToken(configPath string, inference *Inference) error {
-	if inference.Token != "" && inference.TokenFile != "" {
-		return errors.New("inference token and token_file are mutually exclusive")
-	}
-	if inference.TokenFile == "" {
-		return nil
-	}
-
-	tokenPath, err := resolveTokenFilePath(configPath, inference.TokenFile)
+func readInferenceTokenFile(tokenPath string) (string, error) {
+	tokenFile, err := openInferenceTokenFile(tokenPath)
 	if err != nil {
-		return err
+		return "", err
 	}
-	tokenInfo, err := os.Stat(tokenPath)
+	defer func() {
+		if closeErr := tokenFile.Close(); closeErr != nil {
+			slog.Warn("config.inference_token_file.close_failed", "path", tokenPath, "err", closeErr)
+		}
+	}()
+	return readOpenedInferenceTokenFile(tokenFile, tokenPath)
+}
+
+func openInferenceTokenFile(tokenPath string) (*os.File, error) {
+	flags := unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
+	fileDescriptor, err := unix.Open(tokenPath, flags, 0)
+	if err != nil {
+		if errors.Is(err, unix.ELOOP) {
+			return nil, fmt.Errorf("inference token_file must not be a symlink: %s", tokenPath)
+		}
+		slog.Warn("config.inference_token_file.open_failed", "path", tokenPath, "err", err)
+		return nil, fmt.Errorf("read inference token_file %s: %w", tokenPath, err)
+	}
+	return os.NewFile(uintptr(fileDescriptor), tokenPath), nil
+}
+
+func readOpenedInferenceTokenFile(tokenFile *os.File, tokenPath string) (string, error) {
+	tokenInfo, err := tokenFile.Stat()
 	if err != nil {
 		slog.Warn("config.inference_token_file.stat_failed", "path", tokenPath, "err", err)
-		return fmt.Errorf("read inference token_file %s: %w", tokenPath, err)
+		return "", fmt.Errorf("stat inference token_file %s: %w", tokenPath, err)
 	}
 	if !tokenInfo.Mode().IsRegular() {
-		return fmt.Errorf("inference token_file must be a regular file: %s", tokenPath)
+		return "", fmt.Errorf("inference token_file must be a regular file: %s", tokenPath)
 	}
-	if tokenInfo.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf(
-			"inference token_file must not be accessible by group or other users: %s",
+	if tokenInfo.Mode().Perm() != 0o600 {
+		return "", fmt.Errorf("inference token_file must have permissions 0600: %s", tokenPath)
+	}
+
+	tokenBytes, err := io.ReadAll(io.LimitReader(tokenFile, maxInferenceTokenBytes+1))
+	if err != nil {
+		slog.Warn("config.inference_token_file.read_failed", "path", tokenPath, "err", err)
+		return "", fmt.Errorf("read inference token_file %s: %w", tokenPath, err)
+	}
+	if len(tokenBytes) > maxInferenceTokenBytes {
+		return "", fmt.Errorf(
+			"inference token_file exceeds maximum size of %d bytes: %s",
+			maxInferenceTokenBytes,
 			tokenPath,
 		)
 	}
-	tokenBytes, err := os.ReadFile(tokenPath)
-	if err != nil {
-		slog.Warn("config.inference_token_file.read_failed", "path", tokenPath, "err", err)
-		return fmt.Errorf("read inference token_file %s: %w", tokenPath, err)
-	}
 	token := strings.TrimSpace(string(tokenBytes))
 	if token == "" {
-		return fmt.Errorf("inference token_file is empty: %s", tokenPath)
+		return "", fmt.Errorf("inference token_file is empty: %s", tokenPath)
 	}
-	inference.Token = token
-	return nil
+	return token, nil
 }
 
 func resolveTokenFilePath(configPath string, tokenFile string) (string, error) {
