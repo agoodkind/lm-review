@@ -16,6 +16,7 @@ import (
 
 	"goodkind.io/gklog"
 	"goodkind.io/lm-review/internal/config"
+	"goodkind.io/lm-review/internal/requestmeta"
 )
 
 func TestChatReviewSendsJSONSchemaResponseFormat(t *testing.T) {
@@ -81,6 +82,60 @@ func TestChatSchemaSendsCallerSchemaInStrictMode(t *testing.T) {
 	gotSchema := requireMap(t, jsonSchema["schema"], "response_format.json_schema.schema")
 	if !reflect.DeepEqual(gotSchema, wantSchema) {
 		t.Fatalf("schema=%#v, want %#v", gotSchema, wantSchema)
+	}
+}
+
+func TestChatSchemaDetailedSendsReasoningOptionsAndReturnsMetadata(t *testing.T) {
+	maxCompletionTokens := int64(2048)
+	requestBody, result := captureDetailedChatRequest(t, SchemaGenerationOptions{
+		ReasoningEffort:     "high",
+		MaxCompletionTokens: &maxCompletionTokens,
+		Temperature:         nil,
+	})
+
+	if got := requestBody["model"]; got != "gpt-5.4-mini" {
+		t.Fatalf("model=%v, want gpt-5.4-mini", got)
+	}
+	if got := requestBody["reasoning_effort"]; got != "high" {
+		t.Fatalf("reasoning_effort=%v, want high", got)
+	}
+	if got := requireFloat64(t, requestBody["max_completion_tokens"], "max_completion_tokens"); got != 2048 {
+		t.Fatalf("max_completion_tokens=%v, want 2048", got)
+	}
+	if _, ok := requestBody["max_tokens"]; ok {
+		t.Fatalf("max_tokens=%v, want omitted", requestBody["max_tokens"])
+	}
+	if _, ok := requestBody["temperature"]; ok {
+		t.Fatalf("temperature=%v, want omitted", requestBody["temperature"])
+	}
+	if _, ok := requestBody["top_k"]; ok {
+		t.Fatalf("top_k=%v, want omitted", requestBody["top_k"])
+	}
+	if _, ok := requestBody["repeat_penalty"]; ok {
+		t.Fatalf("repeat_penalty=%v, want omitted", requestBody["repeat_penalty"])
+	}
+	if result.RequestID != "inference-test-single" || result.ActualModel != "gpt-5.4-mini-2026-07-01" {
+		t.Fatalf("result identity=%#v", result)
+	}
+	if result.BackendFingerprint != "fp_test" || result.BackendVersion != "backend-2026.07" {
+		t.Fatalf("result backend metadata=%#v", result)
+	}
+	if result.PromptTokens != 41 || result.CompletionTokens != 7 || result.TotalTokens != 48 {
+		t.Fatalf("result usage=%#v", result)
+	}
+	if result.FinishReason != "stop" || result.Latency < 0 {
+		t.Fatalf("result completion metadata=%#v", result)
+	}
+}
+
+func TestChatSchemaDetailedSendsExplicitTemperature(t *testing.T) {
+	temperature := 0.0
+	requestBody, _ := captureDetailedChatRequest(t, SchemaGenerationOptions{
+		Temperature: &temperature,
+	})
+
+	if got := requireFloat64(t, requestBody["temperature"], "temperature"); got != 0 {
+		t.Fatalf("temperature=%v, want 0", got)
 	}
 }
 
@@ -248,6 +303,47 @@ func captureChatRequestWithSettings(t *testing.T, settings config.ChatSettings, 
 		t.Fatalf("path=%q, want %q", captured.path, "/v1/chat/completions")
 	}
 	return captured.body
+}
+
+func captureDetailedChatRequest(t *testing.T, options SchemaGenerationOptions) (map[string]any, ChatResult) {
+	t.Helper()
+
+	requestBody := make(map[string]any)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		payload, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Errorf("read request: %v", err)
+			return
+		}
+		if err := json.Unmarshal(payload, &requestBody); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Backend-Version", "backend-2026.07")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-inference","object":"chat.completion","created":0,"model":"gpt-5.4-mini-2026-07-01","system_fingerprint":"fp_test","usage":{"prompt_tokens":41,"completion_tokens":7,"total_tokens":48},"choices":[{"index":0,"message":{"role":"assistant","content":"{\"decision\":\"allow\"}"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+
+	topK := 40
+	repeatPenalty := 1.05
+	client := New(server.URL, "test-token", "gpt-5.4-mini", 8192, time.Second, config.ChatSettings{
+		Temperature:   0.7,
+		TopK:          &topK,
+		RepeatPenalty: &repeatPenalty,
+	})
+	ctx := requestmeta.With(context.Background(), requestmeta.Metadata{ReviewID: "inference-test"})
+	result, err := client.ChatSchemaDetailed(
+		ctx,
+		"prompt",
+		"input",
+		json.RawMessage(`{"type":"object"}`),
+		options,
+	)
+	if err != nil {
+		t.Fatalf("ChatSchemaDetailed: %v", err)
+	}
+	return requestBody, result
 }
 
 func requireFloat64(t *testing.T, value any, field string) float64 {

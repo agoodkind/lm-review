@@ -2,17 +2,12 @@ package main
 
 import "testing"
 
-func TestInferenceAndDeprecatedJudgeCommandsShareGenericRunner(t *testing.T) {
-	inferenceCommand := newInferenceCmd()
-	if inferenceCommand.Use != "inference" || inferenceCommand.Hidden {
-		t.Fatalf("inference command use=%q hidden=%t", inferenceCommand.Use, inferenceCommand.Hidden)
+func TestRootCommandExposesInferenceWithoutJudgeAlias(t *testing.T) {
+	root := newRootCmd()
+	if command, _, err := root.Find([]string{"inference"}); err != nil || command.Name() != "inference" {
+		t.Fatalf("find inference command=%v err=%v", command, err)
 	}
-
-	judgeCommand := newJudgeAliasCmd()
-	if judgeCommand.Use != "judge" || !judgeCommand.Hidden {
-		t.Fatalf("judge alias use=%q hidden=%t", judgeCommand.Use, judgeCommand.Hidden)
-	}
-	if judgeCommand.Short != inferenceCommand.Short {
-		t.Fatalf("judge alias short=%q, want %q", judgeCommand.Short, inferenceCommand.Short)
+	if command, _, err := root.Find([]string{"judge"}); err == nil && command.Name() == "judge" {
+		t.Fatalf("deprecated judge alias remains registered: %v", command)
 	}
 }

@@ -64,6 +64,18 @@ func tryFindRepoRoot(ctx context.Context) (string, bool) {
 }
 
 func main() {
+	root := newRootCmd()
+
+	err := root.Execute()
+	if errors.Is(err, errBlock) {
+		os.Exit(1)
+	}
+	if err != nil {
+		os.Exit(1)
+	}
+}
+
+func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "lm-review",
 		Short: "LLM-powered local code review using LM Studio",
@@ -75,19 +87,12 @@ func main() {
 	root.AddCommand(newReviewCmd())
 	root.AddCommand(newDaemonCmd())
 	root.AddCommand(newInferenceCmd())
-	root.AddCommand(newJudgeAliasCmd())
 	root.AddCommand(newMCPCmd())
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newVersionCmd())
 	root.AddCommand(newUpdateCmd())
 
-	err := root.Execute()
-	if errors.Is(err, errBlock) {
-		os.Exit(1)
-	}
-	if err != nil {
-		os.Exit(1)
-	}
+	return root
 }
 
 func newDiffCmd() *cobra.Command {
@@ -230,20 +235,11 @@ func newDaemonCmd() *cobra.Command {
 }
 
 func newInferenceCmd() *cobra.Command {
-	return newInferenceServerCmd("inference", false)
-}
-
-func newJudgeAliasCmd() *cobra.Command {
-	return newInferenceServerCmd("judge", true)
-}
-
-func newInferenceServerCmd(name string, hidden bool) *cobra.Command {
 	var listenAddress string
 	var model string
 	cmd := &cobra.Command{
-		Use:    name,
-		Short:  "Start the lm-review inference gRPC service",
-		Hidden: hidden,
+		Use:   "inference",
+		Short: "Start the lm-review inference gRPC service",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			log := lmReviewLog(cmd.Context())
 			cfg, err := config.Load()
