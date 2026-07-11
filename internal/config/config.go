@@ -34,7 +34,7 @@ type Config struct {
 type Inference struct {
 	Model         string `toml:"model,omitempty"`
 	ListenAddress string `toml:"listen_address,omitempty"`
-	URL           string `toml:"url,omitempty"`
+	BaseURL       string `toml:"base_url,omitempty"`
 	Token         string `toml:"token,omitempty"`
 }
 
@@ -57,8 +57,9 @@ func (i Inference) ResolveListenAddress() string {
 // ResolveBackend applies inference-specific connection overrides to the global backend.
 func (i Inference) ResolveBackend(global OpenAICompat) OpenAICompat {
 	backend := global
-	if i.URL != "" {
-		backend.URL = i.URL
+	if i.BaseURL != "" {
+		backend.URL = i.BaseURL
+		backend.Token = ""
 	}
 	if i.Token != "" {
 		backend.Token = i.Token

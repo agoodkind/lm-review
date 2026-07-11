@@ -29,55 +29,71 @@ func TestRootCommandExposesInferenceWithoutJudgeAlias(t *testing.T) {
 }
 
 func TestNewInferenceServerUsesEffectiveBackendAndRequestModel(t *testing.T) {
-	var globalCalls atomic.Int32
-	globalBackend := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		globalCalls.Add(1)
-	}))
-	defer globalBackend.Close()
-
-	var authorization string
-	requestBody := make(map[string]any)
-	inferenceBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		authorization = request.Header.Get("Authorization")
-		if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
-			t.Errorf("decode request: %v", err)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"chatcmpl-test","object":"chat.completion","created":0,"model":"actual-model","choices":[{"index":0,"message":{"role":"assistant","content":"{\"decision\":\"allow\"}"},"finish_reason":"stop"}]}`))
-	}))
-	defer inferenceBackend.Close()
-
-	cfg := &config.Config{
-		OpenAICompat: config.OpenAICompat{
-			URL:               globalBackend.URL,
-			Token:             "global-token",
-			MaxResponseTokens: 256,
-		},
-		Inference: config.Inference{
-			URL:   inferenceBackend.URL,
-			Token: "inference-token",
+	tests := []struct {
+		name              string
+		inferenceToken    string
+		wantAuthorization string
+	}{
+		{name: "base URL only sends no credential", wantAuthorization: ""},
+		{
+			name:              "explicit inference token is sent",
+			inferenceToken:    "inference-token",
+			wantAuthorization: "Bearer inference-token",
 		},
 	}
-	server := newInferenceServer(cfg, "configured-model")
-	request := &inferencepb.InferRequest{
-		Prompt:       "Classify",
-		Input:        "sample",
-		OutputSchema: `{"type":"object","additionalProperties":false,"properties":{"decision":{"type":"string"}},"required":["decision"]}`,
-		Model:        "request-model",
-	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var globalCalls atomic.Int32
+			globalBackend := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				globalCalls.Add(1)
+			}))
+			defer globalBackend.Close()
 
-	if _, err := server.Infer(context.Background(), request); err != nil {
-		t.Fatalf("Infer returned error: %v", err)
-	}
-	if globalCalls.Load() != 0 {
-		t.Fatalf("global backend calls=%d, want 0", globalCalls.Load())
-	}
-	if authorization != "Bearer inference-token" {
-		t.Fatalf("authorization=%q, want inference credential", authorization)
-	}
-	if requestBody["model"] != "request-model" {
-		t.Fatalf("model=%v, want request-model", requestBody["model"])
+			var authorization string
+			requestBody := make(map[string]any)
+			inferenceBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				authorization = request.Header.Get("Authorization")
+				if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
+					t.Errorf("decode request: %v", err)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"chatcmpl-test","object":"chat.completion","created":0,"model":"actual-model","choices":[{"index":0,"message":{"role":"assistant","content":"{\"decision\":\"allow\"}"},"finish_reason":"stop"}]}`))
+			}))
+			defer inferenceBackend.Close()
+
+			cfg := &config.Config{
+				OpenAICompat: config.OpenAICompat{
+					URL:               globalBackend.URL,
+					Token:             "global-secret-canary",
+					MaxResponseTokens: 256,
+				},
+				Inference: config.Inference{
+					BaseURL: inferenceBackend.URL,
+					Token:   test.inferenceToken,
+				},
+			}
+			server := newInferenceServer(cfg, "configured-model")
+			request := &inferencepb.InferRequest{
+				Prompt:       "Classify",
+				Input:        "sample",
+				OutputSchema: `{"type":"object","additionalProperties":false,"properties":{"decision":{"type":"string"}},"required":["decision"]}`,
+				Model:        "request-model",
+			}
+
+			if _, err := server.Infer(context.Background(), request); err != nil {
+				t.Fatalf("Infer returned error: %v", err)
+			}
+			if globalCalls.Load() != 0 {
+				t.Fatalf("global backend calls=%d, want 0", globalCalls.Load())
+			}
+			if authorization != test.wantAuthorization {
+				t.Fatalf("authorization=%q, want %q", authorization, test.wantAuthorization)
+			}
+			if requestBody["model"] != "request-model" {
+				t.Fatalf("model=%v, want request-model", requestBody["model"])
+			}
+		})
 	}
 }
 
@@ -98,7 +114,7 @@ func TestInferenceServerErrorsAndLogsDoNotExposeCredential(t *testing.T) {
 	ctx := gklog.WithLogger(context.Background(), logger)
 	cfg := &config.Config{
 		OpenAICompat: config.OpenAICompat{URL: "http://global.invalid", Token: "global-token"},
-		Inference:    config.Inference{URL: backend.URL, Token: credential, Model: "test-model"},
+		Inference:    config.Inference{BaseURL: backend.URL, Token: credential, Model: "test-model"},
 	}
 	server := newInferenceServer(cfg, cfg.Inference.ResolveModel())
 	request := &inferencepb.InferRequest{
@@ -130,7 +146,7 @@ func TestWriteConfigDocumentsOptionalInferenceBackendWithoutDuplicatingCredentia
 	}
 	content := string(contentBytes)
 	for _, line := range []string{
-		`# url = "https://inference.example.com"`,
+		`# base_url = "https://inference.example.com"`,
 		`# token = "replace-with-inference-token"`,
 	} {
 		if !strings.Contains(content, line) {

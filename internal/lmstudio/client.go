@@ -237,14 +237,19 @@ func parseTokenUsagePresence(rawResponse string) tokenUsagePresence {
 			total:      false,
 		}
 	}
-	_, promptPresent := response.Usage["prompt_tokens"]
-	_, completionPresent := response.Usage["completion_tokens"]
-	_, totalPresent := response.Usage["total_tokens"]
 	return tokenUsagePresence{
-		prompt:     promptPresent,
-		completion: completionPresent,
-		total:      totalPresent,
+		prompt:     nonNullJSONField(response.Usage, "prompt_tokens"),
+		completion: nonNullJSONField(response.Usage, "completion_tokens"),
+		total:      nonNullJSONField(response.Usage, "total_tokens"),
 	}
+}
+
+func nonNullJSONField(fields map[string]json.RawMessage, name string) bool {
+	value, ok := fields[name]
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(string(value)) != "null"
 }
 
 func schemaGenerationOptionsEmpty(options SchemaGenerationOptions) bool {

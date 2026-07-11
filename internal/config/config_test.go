@@ -3,6 +3,8 @@ package config
 import (
 	"testing"
 	"time"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestResolveReviewChunkBytesCapsLargeContext(t *testing.T) {
@@ -68,10 +70,10 @@ func TestInferenceResolveBackend(t *testing.T) {
 			wantToken: global.Token,
 		},
 		{
-			name:      "overrides URL only",
-			inference: Inference{URL: "https://inference.example.test"},
+			name:      "overrides base URL without inheriting token",
+			inference: Inference{BaseURL: "https://inference.example.test"},
 			wantURL:   "https://inference.example.test",
-			wantToken: global.Token,
+			wantToken: "",
 		},
 		{
 			name:      "overrides token only",
@@ -80,10 +82,10 @@ func TestInferenceResolveBackend(t *testing.T) {
 			wantToken: "inference-token",
 		},
 		{
-			name: "overrides URL and token",
+			name: "overrides base URL and token",
 			inference: Inference{
-				URL:   "https://inference.example.test",
-				Token: "inference-token",
+				BaseURL: "https://inference.example.test",
+				Token:   "inference-token",
 			},
 			wantURL:   "https://inference.example.test",
 			wantToken: "inference-token",
@@ -111,6 +113,25 @@ func TestInferenceResolveBackend(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestInferenceTOMLDecodesBaseURL(t *testing.T) {
+	var cfg struct {
+		Inference Inference `toml:"inference"`
+	}
+	_, err := toml.Decode(`[inference]
+base_url = "https://inference.example.test"
+token = "inference-token"
+`, &cfg)
+	if err != nil {
+		t.Fatalf("decode TOML: %v", err)
+	}
+	if cfg.Inference.BaseURL != "https://inference.example.test" {
+		t.Fatalf("base_url=%q, want configured URL", cfg.Inference.BaseURL)
+	}
+	if cfg.Inference.Token != "inference-token" {
+		t.Fatalf("token=%q, want configured token", cfg.Inference.Token)
 	}
 }
 

@@ -94,8 +94,8 @@ func TestOpenAICompatBuildClientIgnoresInferenceBackendOverride(t *testing.T) {
 			FastModel: "global-model",
 		},
 		Inference: config.Inference{
-			URL:   inferenceBackend.URL,
-			Token: "inference-token",
+			BaseURL: inferenceBackend.URL,
+			Token:   "inference-token",
 		},
 	}}
 	client, _ := server.buildClient("diff", "normal", "")

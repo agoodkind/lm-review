@@ -181,6 +181,55 @@ func TestChatSchemaDetailedMarksExplicitZeroUsagePresent(t *testing.T) {
 	}
 }
 
+func TestParseTokenUsagePresenceTreatsNullFieldsAsAbsent(t *testing.T) {
+	tests := []struct {
+		name           string
+		response       string
+		wantPrompt     bool
+		wantCompletion bool
+		wantTotal      bool
+	}{
+		{
+			name:           "null prompt tokens",
+			response:       `{"usage":{"prompt_tokens":null,"completion_tokens":0,"total_tokens":0}}`,
+			wantPrompt:     false,
+			wantCompletion: true,
+			wantTotal:      true,
+		},
+		{
+			name:           "null completion tokens",
+			response:       `{"usage":{"prompt_tokens":0,"completion_tokens":null,"total_tokens":0}}`,
+			wantPrompt:     true,
+			wantCompletion: false,
+			wantTotal:      true,
+		},
+		{
+			name:           "null total tokens",
+			response:       `{"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":null}}`,
+			wantPrompt:     true,
+			wantCompletion: true,
+			wantTotal:      false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			presence := parseTokenUsagePresence(test.response)
+
+			if presence.prompt != test.wantPrompt ||
+				presence.completion != test.wantCompletion ||
+				presence.total != test.wantTotal {
+				t.Fatalf("presence=%+v, want prompt=%v completion=%v total=%v",
+					presence,
+					test.wantPrompt,
+					test.wantCompletion,
+					test.wantTotal,
+				)
+			}
+		})
+	}
+}
+
 func TestChatSchemaSanitizesBackendErrorLogsAndReturn(t *testing.T) {
 	secrets := []string{
 		"prompt-secret-8e31",
