@@ -9,7 +9,28 @@ import (
 
 func TestCheckPreflightAllowsFreeListener(t *testing.T) {
 	dependencies := testDependencies([]int{}, nil, nil)
+	dependencies.ProbeBind = func(context.Context, string) error { return nil }
 	if err := Check(context.Background(), PhasePreflight, "[::1]:5401", 0, dependencies); err != nil {
+		t.Fatalf("Check returned error: %v", err)
+	}
+}
+
+func TestCheckPreflightRejectsBindRaceWithoutOwner(t *testing.T) {
+	dependencies := testDependencies([]int{}, nil, nil)
+	err := Check(context.Background(), PhasePreflight, "[::1]:5401", 41, dependencies)
+	if err == nil || !strings.Contains(err.Error(), "does not own") {
+		t.Fatalf("error=%v, want ownership race failure", err)
+	}
+}
+
+func TestCheckPreflightAllowsUnrelatedCoexistingListener(t *testing.T) {
+	dependencies := testDependencies([]int{82}, nil, nil)
+	dependencies.ProbeBind = func(context.Context, string) error { return nil }
+	dependencies.ListenerPIDs = func(context.Context, string, int) ([]int, error) {
+		t.Fatal("ownership lookup ran after successful exact bind probe")
+		return nil, nil
+	}
+	if err := Check(context.Background(), PhasePreflight, "127.0.0.1:5401", 41, dependencies); err != nil {
 		t.Fatalf("Check returned error: %v", err)
 	}
 }
@@ -81,6 +102,9 @@ func testDependencies(
 		},
 		CheckHealth: func(context.Context, string) error {
 			return healthErr
+		},
+		ProbeBind: func(context.Context, string) error {
+			return errors.New("address already in use")
 		},
 	}
 }

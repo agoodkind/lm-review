@@ -46,6 +46,7 @@ const (
 type Dependencies struct {
 	ListenerPIDs func(context.Context, string, int) ([]int, error)
 	CheckHealth  func(context.Context, string) error
+	ProbeBind    func(context.Context, string) error
 }
 
 // DefaultDependencies returns platform listener lookup and gRPC health checks.
@@ -53,6 +54,7 @@ func DefaultDependencies() Dependencies {
 	return Dependencies{
 		ListenerPIDs: readListenerPIDs,
 		CheckHealth:  readHealth,
+		ProbeBind:    probeBind,
 	}
 }
 
@@ -77,6 +79,15 @@ func Check(
 	if phase == PhasePostRestart && expectedPID <= 0 {
 		return errors.New("post-restart check requires a positive service PID")
 	}
+	if phase == PhasePreflight {
+		bindErr := dependencies.ProbeBind(ctx, listenAddress)
+		if bindErr == nil {
+			return nil
+		}
+		if expectedPID <= 0 {
+			return fmt.Errorf("configured listener %s is unavailable: %w", listenAddress, bindErr)
+		}
+	}
 	listenerPIDs, err := dependencies.ListenerPIDs(ctx, listenAddress, expectedPID)
 	if err != nil {
 		slog.ErrorContext(ctx, "inference.service_check.listener_failed", "err", err)
@@ -90,6 +101,13 @@ func Check(
 			"configured listener %s is occupied by non-service PID %d",
 			listenAddress,
 			listenerPID,
+		)
+	}
+	if phase == PhasePreflight && !slices.Contains(listenerPIDs, expectedPID) {
+		return fmt.Errorf(
+			"service PID %d does not own unavailable configured listener %s",
+			expectedPID,
+			listenAddress,
 		)
 	}
 	if phase == PhasePostRestart && !slices.Contains(listenerPIDs, expectedPID) {
@@ -134,7 +152,7 @@ func readListenerPIDs(ctx context.Context, listenAddress string, expectedPID int
 		if _, err := exec.LookPath("lsof"); err != nil {
 			return nil, errors.New("listener ownership check requires lsof in PATH")
 		}
-		return readListenerPIDsFromLsof(ctx, validatedPort)
+		return readListenerPIDsFromLsof(ctx, host, validatedPort)
 	case operatingSystemLinux:
 		return readListenerPIDsFromProcAddress(ctx, "/proc", localAddress, validatedPort, expectedPID)
 	default:
@@ -142,15 +160,19 @@ func readListenerPIDs(ctx context.Context, listenAddress string, expectedPID int
 	}
 }
 
-func readListenerPIDsFromLsof(ctx context.Context, port string) ([]int, error) {
+func readListenerPIDsFromLsof(ctx context.Context, host string, port string) ([]int, error) {
 	slog.DebugContext(ctx, "inference.service_check.lsof.begin", "port", port)
-	// #nosec G204 -- port is parsed as an integer and rendered canonically by the caller.
+	lsofHost := host
+	if strings.Contains(host, ":") {
+		lsofHost = "[" + host + "]"
+	}
+	// #nosec G204 -- host is a parsed literal address and port is rendered canonically.
 	command := exec.CommandContext(
 		ctx,
 		"lsof",
 		"-nP",
 		"-t",
-		"-iTCP:"+port,
+		"-iTCP@"+lsofHost+":"+port,
 		"-sTCP:LISTEN",
 	)
 	output, err := command.Output()
@@ -163,6 +185,20 @@ func readListenerPIDsFromLsof(ctx context.Context, port string) ([]int, error) {
 		return nil, fmt.Errorf("run lsof: %w", err)
 	}
 	return readPIDLines(ctx, string(output))
+}
+
+func probeBind(ctx context.Context, listenAddress string) error {
+	listenConfig := &net.ListenConfig{}
+	listener, err := listenConfig.Listen(ctx, "tcp", listenAddress)
+	if err != nil {
+		slog.ErrorContext(ctx, "inference.service_check.bind_probe_failed", "err", err)
+		return fmt.Errorf("bind probe: %w", err)
+	}
+	if err := listener.Close(); err != nil {
+		slog.ErrorContext(ctx, "inference.service_check.bind_probe_close_failed", "err", err)
+		return fmt.Errorf("close bind probe: %w", err)
+	}
+	return nil
 }
 
 func readPIDLines(ctx context.Context, output string) ([]int, error) {
