@@ -18,7 +18,7 @@ import (
 	"goodkind.io/lm-review/internal/daemon"
 	"goodkind.io/lm-review/internal/github"
 	"goodkind.io/lm-review/internal/gitutil"
-	"goodkind.io/lm-review/internal/judge"
+	"goodkind.io/lm-review/internal/inference"
 	"goodkind.io/lm-review/internal/mcpserver"
 	"goodkind.io/lm-review/internal/version"
 	"goodkind.io/lm-review/internal/xdg"
@@ -74,7 +74,8 @@ func main() {
 	root.AddCommand(newRepoCmd())
 	root.AddCommand(newReviewCmd())
 	root.AddCommand(newDaemonCmd())
-	root.AddCommand(newJudgeCmd())
+	root.AddCommand(newInferenceCmd())
+	root.AddCommand(newJudgeAliasCmd())
 	root.AddCommand(newMCPCmd())
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newVersionCmd())
@@ -228,41 +229,58 @@ func newDaemonCmd() *cobra.Command {
 	}
 }
 
-func newJudgeCmd() *cobra.Command {
+func newInferenceCmd() *cobra.Command {
+	return newInferenceServerCmd("inference", false)
+}
+
+func newJudgeAliasCmd() *cobra.Command {
+	return newInferenceServerCmd("judge", true)
+}
+
+func newInferenceServerCmd(name string, hidden bool) *cobra.Command {
 	var listenAddress string
 	var model string
 	cmd := &cobra.Command{
-		Use:   "judge",
-		Short: "Start the lm-review judge gRPC service",
+		Use:    name,
+		Short:  "Start the lm-review inference gRPC service",
+		Hidden: hidden,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			log := lmReviewLog(cmd.Context())
 			cfg, err := config.Load()
 			if err != nil {
-				log.ErrorContext(cmd.Context(), "judge.config.load_failed", "err", err)
+				log.ErrorContext(cmd.Context(), "inference.config.load_failed", "err", err)
 				return fmt.Errorf("load config: %w", err)
 			}
 			if listenAddress == "" {
-				listenAddress = cfg.Judge.ResolveListenAddress()
+				listenAddress = cfg.Inference.ResolveListenAddress()
 			}
 			if model == "" {
-				model = cfg.Judge.ResolveModel()
+				model = cfg.Inference.ResolveModel()
 			}
 			baseURL := cfg.OpenAICompat.URL
 			token := cfg.OpenAICompat.Token
-			log.InfoContext(cmd.Context(), "judge.serve.begin",
+			log.InfoContext(cmd.Context(), "inference.serve.begin",
 				"listen_address", listenAddress,
 				"model", model,
 				"base_url", baseURL)
-			err = judge.Serve(cmd.Context(), listenAddress, model, baseURL, token)
+			server := inference.NewOpenAICompatibleServer(
+				model,
+				baseURL,
+				token,
+				cfg.OpenAICompat.ResolveMaxResponseTokens(),
+				cfg.OpenAICompat.ResolveRequestTimeout(),
+				cfg.OpenAICompat.ResolveChatSettings(),
+			)
+			err = inference.Serve(cmd.Context(), listenAddress, server)
 			if err != nil {
-				log.ErrorContext(cmd.Context(), "judge.serve.failed", "err", err)
-				return fmt.Errorf("serve judge: %w", err)
+				log.ErrorContext(cmd.Context(), "inference.serve.failed", "err", err)
+				return fmt.Errorf("serve inference: %w", err)
 			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&listenAddress, "listen", "", "gRPC listen address")
-	cmd.Flags().StringVar(&model, "model", "", "Judge model ID")
+	cmd.Flags().StringVar(&model, "model", "", "Inference model ID")
 	return cmd
 }
 

@@ -53,8 +53,21 @@ lm-review pr              # review branch vs main
 lm-review repo            # full repo health review
 lm-review repo --async    # full repo review in background
 lm-review daemon          # start daemon manually (auto-started on first call)
+lm-review inference       # start declaration-driven inference service
 lm-review mcp             # start MCP stdio server for Claude Code
 ```
+
+## Inference service
+
+The persistent `Inference.Infer` gRPC method accepts a prompt, input, caller-defined JSON Schema, optional opaque JSON context, and optional model override. It returns JSON only after validating the model output against the caller's schema.
+
+```toml
+[inference]
+model = "your-structured-output-model"
+listen_address = "[::1]:5401"
+```
+
+The context value is syntactically validated JSON and remains opaque to lm-review.
 
 ## Development
 

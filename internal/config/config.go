@@ -14,10 +14,10 @@ import (
 
 const (
 	maxReviewChunkBytes = 80 * 1024
-	// DefaultJudgeModel is the model id used by the judge service when config omits it.
-	DefaultJudgeModel = "agentgate/agent-gate-judge"
-	// DefaultJudgeListenAddress is the gRPC listen address used by the judge service when config omits it.
-	DefaultJudgeListenAddress = "[::1]:5401"
+	// DefaultInferenceModel leaves model selection to explicit configuration.
+	DefaultInferenceModel = ""
+	// DefaultInferenceListenAddress is the default inference gRPC listen address.
+	DefaultInferenceListenAddress = "[::1]:5401"
 )
 
 // Config is the top-level configuration.
@@ -26,30 +26,30 @@ type Config struct {
 	OpenAICompat OpenAICompat `toml:"openai_compat"`
 	Claude       Claude       `toml:"claude"`
 	StaticReview StaticReview `toml:"static_review"`
-	Judge        Judge        `toml:"judge"`
+	Inference    Inference    `toml:"inference"`
 	Rules        []Rule       `toml:"rules"`
 }
 
-// Judge holds settings for the standalone judge gRPC service.
-type Judge struct {
+// Inference holds settings for the standalone inference gRPC service.
+type Inference struct {
 	Model         string `toml:"model,omitempty"`
 	ListenAddress string `toml:"listen_address,omitempty"`
 }
 
-// ResolveModel returns the configured judge model id or the default model id.
-func (j Judge) ResolveModel() string {
-	if j.Model != "" {
-		return j.Model
+// ResolveModel returns the configured inference model id.
+func (i Inference) ResolveModel() string {
+	if i.Model != "" {
+		return i.Model
 	}
-	return DefaultJudgeModel
+	return DefaultInferenceModel
 }
 
-// ResolveListenAddress returns the configured judge listen address or the default address.
-func (j Judge) ResolveListenAddress() string {
-	if j.ListenAddress != "" {
-		return j.ListenAddress
+// ResolveListenAddress returns the configured inference listen address or the default address.
+func (i Inference) ResolveListenAddress() string {
+	if i.ListenAddress != "" {
+		return i.ListenAddress
 	}
-	return DefaultJudgeListenAddress
+	return DefaultInferenceListenAddress
 }
 
 // StaticReview configures the deterministic static-analysis pipeline that backs
@@ -322,7 +322,7 @@ func Load() (*Config, error) {
 		LMStudio     OpenAICompat `toml:"lmstudio"`
 		Claude       Claude       `toml:"claude"`
 		StaticReview StaticReview `toml:"static_review"`
-		Judge        Judge        `toml:"judge"`
+		Inference    Inference    `toml:"inference"`
 		Rules        []Rule       `toml:"rules"`
 	}
 	if _, err := toml.DecodeFile(path, &raw); err != nil {
@@ -334,7 +334,7 @@ func Load() (*Config, error) {
 		OpenAICompat: raw.OpenAICompat,
 		Claude:       raw.Claude,
 		StaticReview: raw.StaticReview,
-		Judge:        raw.Judge,
+		Inference:    raw.Inference,
 		Rules:        raw.Rules,
 	}
 	if cfg.OpenAICompat.URL == "" {

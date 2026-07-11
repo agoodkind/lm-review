@@ -11,4 +11,4 @@ include bootstrap.mk
 .PHONY: proto
 proto:
 	protoc --proto_path=api --go_out=api/reviewpb --go_opt=paths=source_relative --go-grpc_out=api/reviewpb --go-grpc_opt=paths=source_relative review.proto
-	protoc --proto_path=api/judgepb --go_out=api/judgepb --go_opt=paths=source_relative --go-grpc_out=api/judgepb --go-grpc_opt=paths=source_relative judge.proto
+	protoc --proto_path=api/inferencepb --go_out=api/inferencepb --go_opt=paths=source_relative --go-grpc_out=api/inferencepb --go-grpc_opt=paths=source_relative inference.proto

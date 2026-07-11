@@ -37,14 +37,14 @@ func TestResolveRequestTimeout(t *testing.T) {
 	}
 }
 
-func TestJudgeDefaults(t *testing.T) {
-	cfg := Judge{}
+func TestInferenceDefaults(t *testing.T) {
+	cfg := Inference{}
 
-	if got := cfg.ResolveModel(); got != DefaultJudgeModel {
-		t.Fatalf("model=%q, want %q", got, DefaultJudgeModel)
+	if got := cfg.ResolveModel(); got != DefaultInferenceModel {
+		t.Fatalf("model=%q, want %q", got, DefaultInferenceModel)
 	}
-	if got := cfg.ResolveListenAddress(); got != DefaultJudgeListenAddress {
-		t.Fatalf("listen_address=%q, want %q", got, DefaultJudgeListenAddress)
+	if got := cfg.ResolveListenAddress(); got != DefaultInferenceListenAddress {
+		t.Fatalf("listen_address=%q, want %q", got, DefaultInferenceListenAddress)
 	}
 }
 

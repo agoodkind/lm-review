@@ -1,14 +1,20 @@
 package lmstudio
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"goodkind.io/gklog"
 	"goodkind.io/lm-review/internal/config"
 )
 
@@ -50,6 +56,89 @@ func TestChatReviewSendsJSONSchemaResponseFormat(t *testing.T) {
 		if !issueRequired[field] {
 			t.Fatalf("issue schema required missing %q", field)
 		}
+	}
+}
+
+func TestChatSchemaSendsCallerSchemaInStrictMode(t *testing.T) {
+	const schema = `{"type":"object","additionalProperties":false,"properties":{"classification":{"type":"object","additionalProperties":false,"properties":{"breed":{"type":"string","enum":["Labrador","Poodle"]},"traits":{"type":"array","items":{"type":"string","enum":["friendly","active"]}}},"required":["breed","traits"]}},"required":["classification"]}`
+	requestBody := captureChatRequest(t, func(client *Client) error {
+		_, err := client.ChatSchema(context.Background(), "prompt", "input", json.RawMessage(schema))
+		return err
+	})
+
+	responseFormat := requireMap(t, requestBody["response_format"], "response_format")
+	if got := responseFormat["type"]; got != "json_schema" {
+		t.Fatalf("response_format.type=%v, want json_schema", got)
+	}
+	jsonSchema := requireMap(t, responseFormat["json_schema"], "response_format.json_schema")
+	if got := jsonSchema["name"]; got != "inference_output" {
+		t.Fatalf("response_format.json_schema.name=%v, want inference_output", got)
+	}
+	if got, ok := jsonSchema["strict"].(bool); !ok || !got {
+		t.Fatalf("response_format.json_schema.strict=%v, want true", jsonSchema["strict"])
+	}
+	wantSchema := requireMap(t, mustDecodeJSON(t, schema), "want schema")
+	gotSchema := requireMap(t, jsonSchema["schema"], "response_format.json_schema.schema")
+	if !reflect.DeepEqual(gotSchema, wantSchema) {
+		t.Fatalf("schema=%#v, want %#v", gotSchema, wantSchema)
+	}
+}
+
+func TestChatSchemaSanitizesBackendErrorLogsAndReturn(t *testing.T) {
+	secrets := []string{
+		"prompt-secret-8e31",
+		"input-secret-a7c2",
+		"context-secret-420d",
+		"schema-secret-9b14",
+		"output-secret-f651",
+	}
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"message":"` + strings.Join(secrets, " ") + `"}}`))
+	}))
+	defer backend.Close()
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	ctx := gklog.WithLogger(context.Background(), logger)
+	client := New(backend.URL, "test-token", "test-model", 256, time.Second, config.ChatSettings{})
+	schema := json.RawMessage(`{"type":"object","description":"schema-secret-9b14"}`)
+	_, err := client.ChatSchema(
+		ctx,
+		"prompt-secret-8e31",
+		"input-secret-a7c2\ncontext-secret-420d",
+		schema,
+	)
+	if err == nil {
+		t.Fatal("ChatSchema returned nil error, want failure")
+	}
+
+	combined := logs.String() + "\n" + err.Error()
+	for _, secret := range secrets {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("logs or error contain %q: %s", secret, combined)
+		}
+	}
+}
+
+func TestChatPreservesContextCancellationAndDeadline(t *testing.T) {
+	tests := []struct {
+		name string
+		ctx  func() context.Context
+		want error
+	}{
+		{name: "canceled", ctx: canceledChatContext, want: context.Canceled},
+		{name: "deadline", ctx: expiredChatContext, want: context.DeadlineExceeded},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := New("http://[::1]:1", "test-token", "test-model", 256, time.Second, config.ChatSettings{})
+			_, err := client.Chat(test.ctx(), "prompt", "input")
+			if !errors.Is(err, test.want) {
+				t.Fatalf("error=%v, want errors.Is(%v)", err, test.want)
+			}
+		})
 	}
 }
 
@@ -198,4 +287,25 @@ func stringSet(t *testing.T, value any, field string) map[string]bool {
 		values[text] = true
 	}
 	return values
+}
+
+func mustDecodeJSON(t *testing.T, value string) any {
+	t.Helper()
+	var decoded any
+	if err := json.Unmarshal([]byte(value), &decoded); err != nil {
+		t.Fatalf("decode JSON: %v", err)
+	}
+	return decoded
+}
+
+func canceledChatContext() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
+}
+
+func expiredChatContext() context.Context {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	cancel()
+	return ctx
 }

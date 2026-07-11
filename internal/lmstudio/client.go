@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -69,6 +71,12 @@ func (c *Client) ChatReview(ctx context.Context, systemPrompt, userMessage strin
 	return c.chat(ctx, systemPrompt, userMessage, &responseFormat)
 }
 
+// ChatSchema sends a prompt and input while requiring the supplied JSON Schema.
+func (c *Client) ChatSchema(ctx context.Context, prompt, input string, schema json.RawMessage) (string, error) {
+	responseFormat := jsonSchemaResponseFormat("inference_output", schema)
+	return c.chat(ctx, prompt, input, &responseFormat)
+}
+
 func (c *Client) chat(ctx context.Context, systemPrompt, userMessage string, responseFormat *openai.ChatCompletionNewParamsResponseFormatUnion) (string, error) {
 	metadata := requestmeta.From(ctx)
 	requestID := metadata.RequestID()
@@ -86,11 +94,13 @@ func (c *Client) chat(ctx context.Context, systemPrompt, userMessage string, res
 	resp, err := c.inner.Chat.Completions.New(ctx, params, opts...)
 	latency := clock.Since(start)
 	if err != nil {
+		safeError := newChatRequestError(ctx, err, responseStatusCode(httpResp))
 		log.ErrorContext(ctx, "openai.chat.failed",
 			"latency_ms", latency.Milliseconds(),
 			"status_code", responseStatusCode(httpResp),
-			"err", err)
-		return "", fmt.Errorf("OpenAI-compatible chat: %w", err)
+			"error_type", fmt.Sprintf("%T", err),
+			"err", safeError)
+		return "", safeError
 	}
 	if len(resp.Choices) == 0 {
 		err := fmt.Errorf("OpenAI-compatible backend returned no choices")
@@ -115,6 +125,42 @@ func (c *Client) chat(ctx context.Context, systemPrompt, userMessage string, res
 		"choice_count", len(resp.Choices),
 		"response_bytes", len(content))
 	return content, nil
+}
+
+type chatRequestError struct {
+	statusCode int
+	errorType  string
+	cause      error
+}
+
+func newChatRequestError(ctx context.Context, requestError error, statusCode int) error {
+	var cause error
+	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(requestError, context.Canceled) {
+		cause = context.Canceled
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(requestError, context.DeadlineExceeded) {
+		cause = context.DeadlineExceeded
+	}
+	return &chatRequestError{
+		statusCode: statusCode,
+		errorType:  fmt.Sprintf("%T", requestError),
+		cause:      cause,
+	}
+}
+
+func (e *chatRequestError) Error() string {
+	if e.statusCode != 0 {
+		return fmt.Sprintf(
+			"OpenAI-compatible chat failed: status %d, error type %s",
+			e.statusCode,
+			e.errorType,
+		)
+	}
+	return "OpenAI-compatible chat failed: error type " + e.errorType
+}
+
+func (e *chatRequestError) Unwrap() error {
+	return e.cause
 }
 
 func (c *Client) requestLogger(ctx context.Context, metadata requestmeta.Metadata, requestID, systemPrompt, userMessage string) *slog.Logger {
