@@ -253,20 +253,12 @@ func newInferenceCmd() *cobra.Command {
 			if model == "" {
 				model = cfg.Inference.ResolveModel()
 			}
-			baseURL := cfg.OpenAICompat.URL
-			token := cfg.OpenAICompat.Token
+			effectiveBackend := cfg.Inference.ResolveBackend(cfg.OpenAICompat)
 			log.InfoContext(cmd.Context(), "inference.serve.begin",
 				"listen_address", listenAddress,
 				"model", model,
-				"base_url", baseURL)
-			server := inference.NewOpenAICompatibleServer(
-				model,
-				baseURL,
-				token,
-				cfg.OpenAICompat.ResolveMaxResponseTokens(),
-				cfg.OpenAICompat.ResolveRequestTimeout(),
-				cfg.OpenAICompat.ResolveChatSettings(),
-			)
+				"base_url", effectiveBackend.URL)
+			server := newInferenceServer(cfg, model)
 			err = inference.Serve(cmd.Context(), listenAddress, server)
 			if err != nil {
 				log.ErrorContext(cmd.Context(), "inference.serve.failed", "err", err)
@@ -278,6 +270,18 @@ func newInferenceCmd() *cobra.Command {
 	cmd.Flags().StringVar(&listenAddress, "listen", "", "gRPC listen address")
 	cmd.Flags().StringVar(&model, "model", "", "Inference model ID")
 	return cmd
+}
+
+func newInferenceServer(cfg *config.Config, model string) *inference.Server {
+	backend := cfg.Inference.ResolveBackend(cfg.OpenAICompat)
+	return inference.NewOpenAICompatibleServer(
+		model,
+		backend.URL,
+		backend.Token,
+		backend.ResolveMaxResponseTokens(),
+		backend.ResolveRequestTimeout(),
+		backend.ResolveChatSettings(),
+	)
 }
 
 func newMCPCmd() *cobra.Command {

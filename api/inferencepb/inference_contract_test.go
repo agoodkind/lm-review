@@ -1,8 +1,11 @@
 package inferencepb
 
 import (
+	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -69,7 +72,67 @@ func TestInferenceWireContract(t *testing.T) {
 			t.Fatalf("metadata field %q number=%v, want %d", name, field, number)
 		}
 	}
+	for _, name := range []string{"prompt_tokens", "completion_tokens", "total_tokens"} {
+		field := metadataFields.ByName(protoreflect.Name(name))
+		if !field.HasPresence() {
+			t.Fatalf("metadata field %q does not preserve presence", name)
+		}
+	}
 	if Inference_Infer_FullMethodName != "/inference.v1.Inference/Infer" {
 		t.Fatalf("method name=%q", Inference_Infer_FullMethodName)
+	}
+}
+
+func TestInvocationTokenUsagePresenceOnWireAndJSON(t *testing.T) {
+	zero := int64(0)
+	tests := []struct {
+		name        string
+		metadata    *InvocationMetadata
+		wantPresent bool
+	}{
+		{name: "absent", metadata: &InvocationMetadata{}, wantPresent: false},
+		{
+			name: "explicit zero",
+			metadata: &InvocationMetadata{
+				PromptTokens:     &zero,
+				CompletionTokens: &zero,
+				TotalTokens:      &zero,
+			},
+			wantPresent: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			wire, err := proto.Marshal(test.metadata)
+			if err != nil {
+				t.Fatalf("marshal wire: %v", err)
+			}
+			var decoded InvocationMetadata
+			if err := proto.Unmarshal(wire, &decoded); err != nil {
+				t.Fatalf("unmarshal wire: %v", err)
+			}
+			wirePresent := decoded.PromptTokens != nil &&
+				decoded.CompletionTokens != nil && decoded.TotalTokens != nil
+			if wirePresent != test.wantPresent {
+				t.Fatalf("wire presence=%v, want %v", wirePresent, test.wantPresent)
+			}
+
+			encodedJSON, err := protojson.Marshal(test.metadata)
+			if err != nil {
+				t.Fatalf("marshal JSON: %v", err)
+			}
+			jsonPresent := strings.Contains(string(encodedJSON), `"promptTokens":"0"`) &&
+				strings.Contains(string(encodedJSON), `"completionTokens":"0"`) &&
+				strings.Contains(string(encodedJSON), `"totalTokens":"0"`)
+			if jsonPresent != test.wantPresent {
+				t.Fatalf(
+					"JSON presence=%v, want %v: %s",
+					jsonPresent,
+					test.wantPresent,
+					encodedJSON,
+				)
+			}
+		})
 	}
 }

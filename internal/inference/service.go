@@ -49,16 +49,19 @@ type GenerationOptions struct {
 
 // ModelResult contains structured output and backend invocation metadata.
 type ModelResult struct {
-	Output             string
-	RequestID          string
-	ActualModel        string
-	BackendFingerprint string
-	BackendVersion     string
-	PromptTokens       int64
-	CompletionTokens   int64
-	TotalTokens        int64
-	FinishReason       string
-	Latency            time.Duration
+	Output                  string
+	RequestID               string
+	ActualModel             string
+	BackendFingerprint      string
+	BackendVersion          string
+	PromptTokens            int64
+	PromptTokensPresent     bool
+	CompletionTokens        int64
+	CompletionTokensPresent bool
+	TotalTokens             int64
+	TotalTokensPresent      bool
+	FinishReason            string
+	Latency                 time.Duration
 }
 
 // ModelClient performs one schema-driven inference call.
@@ -153,10 +156,6 @@ func (s *Server) Infer(ctx context.Context, request *inferencepb.InferRequest) (
 	if err := schema.Validate(value); err != nil {
 		return nil, status.Error(codes.DataLoss, "model output does not match output_schema")
 	}
-	actualModel := strings.TrimSpace(result.ActualModel)
-	if actualModel == "" {
-		actualModel = model
-	}
 	return &inferencepb.InferReply{
 		OutputJson: result.Output,
 		Status:     inferencepb.InferenceStatus_INFERENCE_STATUS_COMPLETE,
@@ -164,16 +163,19 @@ func (s *Server) Infer(ctx context.Context, request *inferencepb.InferRequest) (
 			RequestId:          result.RequestID,
 			ServiceVersion:     s.serviceVersion,
 			RequestedModel:     model,
-			ActualModel:        actualModel,
+			ActualModel:        strings.TrimSpace(result.ActualModel),
 			BackendFingerprint: result.BackendFingerprint,
 			BackendVersion:     result.BackendVersion,
 			PromptSha256:       sha256Hex(request.GetPrompt()),
 			SchemaSha256:       sha256Hex(request.GetOutputSchema()),
-			PromptTokens:       result.PromptTokens,
-			CompletionTokens:   result.CompletionTokens,
-			TotalTokens:        result.TotalTokens,
-			FinishReason:       result.FinishReason,
-			LatencyMs:          result.Latency.Milliseconds(),
+			PromptTokens:       optionalInt64(result.PromptTokens, result.PromptTokensPresent),
+			CompletionTokens: optionalInt64(
+				result.CompletionTokens,
+				result.CompletionTokensPresent,
+			),
+			TotalTokens:  optionalInt64(result.TotalTokens, result.TotalTokensPresent),
+			FinishReason: result.FinishReason,
+			LatencyMs:    result.Latency.Milliseconds(),
 		},
 	}, nil
 }
@@ -243,6 +245,13 @@ func copyFloat64(value *float64) *float64 {
 	}
 	copied := *value
 	return &copied
+}
+
+func optionalInt64(value int64, present bool) *int64 {
+	if !present {
+		return nil
+	}
+	return &value
 }
 
 // Serve starts the inference gRPC service at listenAddress.
@@ -358,15 +367,18 @@ func (c *openAICompatibleClient) Infer(ctx context.Context, request ModelRequest
 		return ModelResult{}, fmt.Errorf("schema chat: %w", err)
 	}
 	return ModelResult{
-		Output:             result.Content,
-		RequestID:          result.RequestID,
-		ActualModel:        result.ActualModel,
-		BackendFingerprint: result.BackendFingerprint,
-		BackendVersion:     result.BackendVersion,
-		PromptTokens:       result.PromptTokens,
-		CompletionTokens:   result.CompletionTokens,
-		TotalTokens:        result.TotalTokens,
-		FinishReason:       result.FinishReason,
-		Latency:            result.Latency,
+		Output:                  result.Content,
+		RequestID:               result.RequestID,
+		ActualModel:             result.ActualModel,
+		BackendFingerprint:      result.BackendFingerprint,
+		BackendVersion:          result.BackendVersion,
+		PromptTokens:            result.PromptTokens,
+		PromptTokensPresent:     result.PromptTokensPresent,
+		CompletionTokens:        result.CompletionTokens,
+		CompletionTokensPresent: result.CompletionTokensPresent,
+		TotalTokens:             result.TotalTokens,
+		TotalTokensPresent:      result.TotalTokensPresent,
+		FinishReason:            result.FinishReason,
+		Latency:                 result.Latency,
 	}, nil
 }

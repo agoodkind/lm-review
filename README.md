@@ -65,7 +65,11 @@ The persistent `Inference.Infer` gRPC method accepts a prompt, input, caller-def
 [inference]
 model = "your-structured-output-model"
 listen_address = "[::1]:5401"
+# url = "https://inference.example.com"
+# token = "replace-with-inference-token"
 ```
+
+The optional `url` and `token` values override only the inference service backend. Each omitted value inherits its counterpart from `[openai_compat]`, and a request-level model changes only the model identifier.
 
 The context value is syntactically validated JSON and remains opaque to lm-review.
 

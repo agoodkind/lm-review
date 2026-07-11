@@ -52,16 +52,19 @@ type SchemaGenerationOptions struct {
 
 // ChatResult contains the structured output and backend invocation metadata.
 type ChatResult struct {
-	Content            string
-	RequestID          string
-	ActualModel        string
-	BackendFingerprint string
-	BackendVersion     string
-	PromptTokens       int64
-	CompletionTokens   int64
-	TotalTokens        int64
-	FinishReason       string
-	Latency            time.Duration
+	Content                 string
+	RequestID               string
+	ActualModel             string
+	BackendFingerprint      string
+	BackendVersion          string
+	PromptTokens            int64
+	PromptTokensPresent     bool
+	CompletionTokens        int64
+	CompletionTokensPresent bool
+	TotalTokens             int64
+	TotalTokensPresent      bool
+	FinishReason            string
+	Latency                 time.Duration
 }
 
 // New creates a Client targeting the given OpenAI-compatible base URL with the provided token.
@@ -112,6 +115,9 @@ func (c *Client) ChatSchemaDetailed(
 	options SchemaGenerationOptions,
 ) (ChatResult, error) {
 	responseFormat := jsonSchemaResponseFormat("inference_output", schema)
+	if schemaGenerationOptionsEmpty(options) {
+		return c.chatDetailed(ctx, prompt, input, &responseFormat, nil)
+	}
 	return c.chatDetailed(ctx, prompt, input, &responseFormat, &options)
 }
 
@@ -167,16 +173,19 @@ func (c *Client) chatDetailed(
 			"response_bytes", len(content),
 			"err", err)
 		return ChatResult{
-			Content:            content,
-			RequestID:          "",
-			ActualModel:        "",
-			BackendFingerprint: "",
-			BackendVersion:     "",
-			PromptTokens:       0,
-			CompletionTokens:   0,
-			TotalTokens:        0,
-			FinishReason:       "",
-			Latency:            0,
+			Content:                 content,
+			RequestID:               "",
+			ActualModel:             "",
+			BackendFingerprint:      "",
+			BackendVersion:          "",
+			PromptTokens:            0,
+			PromptTokensPresent:     false,
+			CompletionTokens:        0,
+			CompletionTokensPresent: false,
+			TotalTokens:             0,
+			TotalTokensPresent:      false,
+			FinishReason:            "",
+			Latency:                 0,
 		}, err
 	}
 	log.InfoContext(ctx, "openai.chat.end",
@@ -193,18 +202,55 @@ func (c *Client) chatDetailed(
 			"OpenAI-Version",
 		)
 	}
+	usagePresence := parseTokenUsagePresence(resp.RawJSON())
 	return ChatResult{
-		Content:            content,
-		RequestID:          requestID,
-		ActualModel:        resp.Model,
-		BackendFingerprint: backendFingerprint(resp.RawJSON()),
-		BackendVersion:     backendVersion,
-		PromptTokens:       resp.Usage.PromptTokens,
-		CompletionTokens:   resp.Usage.CompletionTokens,
-		TotalTokens:        resp.Usage.TotalTokens,
-		FinishReason:       resp.Choices[0].FinishReason,
-		Latency:            latency,
+		Content:                 content,
+		RequestID:               requestID,
+		ActualModel:             resp.Model,
+		BackendFingerprint:      backendFingerprint(resp.RawJSON()),
+		BackendVersion:          backendVersion,
+		PromptTokens:            resp.Usage.PromptTokens,
+		PromptTokensPresent:     usagePresence.prompt,
+		CompletionTokens:        resp.Usage.CompletionTokens,
+		CompletionTokensPresent: usagePresence.completion,
+		TotalTokens:             resp.Usage.TotalTokens,
+		TotalTokensPresent:      usagePresence.total,
+		FinishReason:            resp.Choices[0].FinishReason,
+		Latency:                 latency,
 	}, nil
+}
+
+type tokenUsagePresence struct {
+	prompt     bool
+	completion bool
+	total      bool
+}
+
+func parseTokenUsagePresence(rawResponse string) tokenUsagePresence {
+	var response struct {
+		Usage map[string]json.RawMessage `json:"usage"`
+	}
+	if err := json.Unmarshal([]byte(rawResponse), &response); err != nil {
+		return tokenUsagePresence{
+			prompt:     false,
+			completion: false,
+			total:      false,
+		}
+	}
+	_, promptPresent := response.Usage["prompt_tokens"]
+	_, completionPresent := response.Usage["completion_tokens"]
+	_, totalPresent := response.Usage["total_tokens"]
+	return tokenUsagePresence{
+		prompt:     promptPresent,
+		completion: completionPresent,
+		total:      totalPresent,
+	}
+}
+
+func schemaGenerationOptionsEmpty(options SchemaGenerationOptions) bool {
+	return options.ReasoningEffort == "" &&
+		options.MaxCompletionTokens == nil &&
+		options.Temperature == nil
 }
 
 func backendFingerprint(rawResponse string) string {

@@ -83,6 +83,15 @@ func TestChatSchemaSendsCallerSchemaInStrictMode(t *testing.T) {
 	if !reflect.DeepEqual(gotSchema, wantSchema) {
 		t.Fatalf("schema=%#v, want %#v", gotSchema, wantSchema)
 	}
+	if got := requireFloat64(t, requestBody["max_tokens"], "max_tokens"); got != 256 {
+		t.Fatalf("max_tokens=%v, want 256", got)
+	}
+	if _, ok := requestBody["max_completion_tokens"]; ok {
+		t.Fatalf(
+			"max_completion_tokens=%v, want omitted",
+			requestBody["max_completion_tokens"],
+		)
+	}
 }
 
 func TestChatSchemaDetailedSendsReasoningOptionsAndReturnsMetadata(t *testing.T) {
@@ -123,6 +132,9 @@ func TestChatSchemaDetailedSendsReasoningOptionsAndReturnsMetadata(t *testing.T)
 	if result.PromptTokens != 41 || result.CompletionTokens != 7 || result.TotalTokens != 48 {
 		t.Fatalf("result usage=%#v", result)
 	}
+	if !result.PromptTokensPresent || !result.CompletionTokensPresent || !result.TotalTokensPresent {
+		t.Fatal("result usage fields are not marked present")
+	}
 	if result.FinishReason != "stop" || result.Latency < 0 {
 		t.Fatalf("result completion metadata=%#v", result)
 	}
@@ -136,6 +148,36 @@ func TestChatSchemaDetailedSendsExplicitTemperature(t *testing.T) {
 
 	if got := requireFloat64(t, requestBody["temperature"], "temperature"); got != 0 {
 		t.Fatalf("temperature=%v, want 0", got)
+	}
+	if got := requireFloat64(t, requestBody["max_completion_tokens"], "max_completion_tokens"); got != 8192 {
+		t.Fatalf("max_completion_tokens=%v, want 8192", got)
+	}
+	if _, ok := requestBody["max_tokens"]; ok {
+		t.Fatalf("max_tokens=%v, want omitted", requestBody["max_tokens"])
+	}
+}
+
+func TestChatSchemaDetailedLeavesUnknownBackendMetadataAbsent(t *testing.T) {
+	response := `{"id":"chatcmpl-inference","object":"chat.completion","created":0,"choices":[{"index":0,"message":{"role":"assistant","content":"{\"decision\":\"allow\"}"},"finish_reason":"stop"}]}`
+	_, result := captureDetailedChatResponse(t, response, SchemaGenerationOptions{})
+
+	if result.ActualModel != "" {
+		t.Fatalf("actual_model=%q, want empty", result.ActualModel)
+	}
+	if result.PromptTokensPresent || result.CompletionTokensPresent || result.TotalTokensPresent {
+		t.Fatal("usage fields are marked present when backend omitted them")
+	}
+}
+
+func TestChatSchemaDetailedMarksExplicitZeroUsagePresent(t *testing.T) {
+	response := `{"id":"chatcmpl-inference","object":"chat.completion","created":0,"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0},"choices":[{"index":0,"message":{"role":"assistant","content":"{\"decision\":\"allow\"}"},"finish_reason":"stop"}]}`
+	_, result := captureDetailedChatResponse(t, response, SchemaGenerationOptions{})
+
+	if !result.PromptTokensPresent || !result.CompletionTokensPresent || !result.TotalTokensPresent {
+		t.Fatal("explicit zero usage fields are not marked present")
+	}
+	if result.PromptTokens != 0 || result.CompletionTokens != 0 || result.TotalTokens != 0 {
+		t.Fatalf("result usage=%#v, want explicit zero values", result)
 	}
 }
 
@@ -307,6 +349,16 @@ func captureChatRequestWithSettings(t *testing.T, settings config.ChatSettings, 
 
 func captureDetailedChatRequest(t *testing.T, options SchemaGenerationOptions) (map[string]any, ChatResult) {
 	t.Helper()
+	response := `{"id":"chatcmpl-inference","object":"chat.completion","created":0,"model":"gpt-5.4-mini-2026-07-01","system_fingerprint":"fp_test","usage":{"prompt_tokens":41,"completion_tokens":7,"total_tokens":48},"choices":[{"index":0,"message":{"role":"assistant","content":"{\"decision\":\"allow\"}"},"finish_reason":"stop"}]}`
+	return captureDetailedChatResponse(t, response, options)
+}
+
+func captureDetailedChatResponse(
+	t *testing.T,
+	response string,
+	options SchemaGenerationOptions,
+) (map[string]any, ChatResult) {
+	t.Helper()
 
 	requestBody := make(map[string]any)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
@@ -321,7 +373,7 @@ func captureDetailedChatRequest(t *testing.T, options SchemaGenerationOptions) (
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Backend-Version", "backend-2026.07")
-		_, _ = w.Write([]byte(`{"id":"chatcmpl-inference","object":"chat.completion","created":0,"model":"gpt-5.4-mini-2026-07-01","system_fingerprint":"fp_test","usage":{"prompt_tokens":41,"completion_tokens":7,"total_tokens":48},"choices":[{"index":0,"message":{"role":"assistant","content":"{\"decision\":\"allow\"}"},"finish_reason":"stop"}]}`))
+		_, _ = w.Write([]byte(response))
 	}))
 	defer server.Close()
 

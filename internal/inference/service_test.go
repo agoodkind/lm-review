@@ -139,8 +139,8 @@ func TestInferSelectsRequestModelOrFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fallback Infer returned error: %v", err)
 	}
-	if got := fallbackReply.GetMetadata().GetActualModel(); got != "fallback-model" {
-		t.Fatalf("actual model=%q, want fallback-model", got)
+	if got := fallbackReply.GetMetadata().GetActualModel(); got != "" {
+		t.Fatalf("actual model=%q, want empty when backend omits identity", got)
 	}
 	if got := strings.Join(models, ","); got != "request-model,fallback-model" {
 		t.Fatalf("models=%q, want request-model,fallback-model", got)
@@ -168,16 +168,19 @@ func TestInferPassesPromptInputContextAndSchema(t *testing.T) {
 	server := NewServer("fallback-model", modelFunc(func(_ context.Context, call ModelRequest) (ModelResult, error) {
 		captured = call
 		return ModelResult{
-			Output:             `{"decision":"allow"}`,
-			RequestID:          "chatcmpl-42",
-			ActualModel:        "gpt-5.4-mini-2026-07-01",
-			BackendFingerprint: "fp_backend",
-			BackendVersion:     "backend-2026.07",
-			PromptTokens:       101,
-			CompletionTokens:   9,
-			TotalTokens:        110,
-			FinishReason:       "stop",
-			Latency:            1250 * time.Millisecond,
+			Output:                  `{"decision":"allow"}`,
+			RequestID:               "chatcmpl-42",
+			ActualModel:             "gpt-5.4-mini-2026-07-01",
+			BackendFingerprint:      "fp_backend",
+			BackendVersion:          "backend-2026.07",
+			PromptTokens:            101,
+			PromptTokensPresent:     true,
+			CompletionTokens:        9,
+			CompletionTokensPresent: true,
+			TotalTokens:             110,
+			TotalTokensPresent:      true,
+			FinishReason:            "stop",
+			Latency:                 1250 * time.Millisecond,
 		}, nil
 	}))
 	request := validRequest(decisionSchema)
@@ -220,6 +223,24 @@ func TestInferPassesPromptInputContextAndSchema(t *testing.T) {
 	}
 	if metadata.GetPromptTokens() != 101 || metadata.GetCompletionTokens() != 9 || metadata.GetTotalTokens() != 110 || metadata.GetFinishReason() != "stop" || metadata.GetLatencyMs() != 1250 {
 		t.Fatalf("completion metadata=%#v", metadata)
+	}
+	if metadata.PromptTokens == nil || metadata.CompletionTokens == nil || metadata.TotalTokens == nil {
+		t.Fatalf("usage presence metadata=%#v", metadata)
+	}
+}
+
+func TestInferOmitsTokenUsageWhenBackendOmitsIt(t *testing.T) {
+	server := NewServer("fallback-model", modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+		return modelOutput(`{"decision":"allow"}`), nil
+	}))
+
+	reply, err := server.Infer(context.Background(), validRequest(decisionSchema))
+	if err != nil {
+		t.Fatalf("Infer returned error: %v", err)
+	}
+	metadata := reply.GetMetadata()
+	if metadata.PromptTokens != nil || metadata.CompletionTokens != nil || metadata.TotalTokens != nil {
+		t.Fatalf("usage metadata=%#v, want absent", metadata)
 	}
 }
 
@@ -278,12 +299,13 @@ func TestServeListenerRemainsAvailableForMultipleCalls(t *testing.T) {
 			return ModelResult{}, errors.New("missing high reasoning effort")
 		}
 		return ModelResult{
-			Output:       `{"decision":"allow"}`,
-			RequestID:    "chatcmpl-rpc",
-			ActualModel:  "gpt-5.4-mini-2026-07-01",
-			TotalTokens:  25,
-			FinishReason: "stop",
-			Latency:      42 * time.Millisecond,
+			Output:             `{"decision":"allow"}`,
+			RequestID:          "chatcmpl-rpc",
+			ActualModel:        "gpt-5.4-mini-2026-07-01",
+			TotalTokens:        25,
+			TotalTokensPresent: true,
+			FinishReason:       "stop",
+			Latency:            42 * time.Millisecond,
 		}, nil
 	}))
 	go func() {

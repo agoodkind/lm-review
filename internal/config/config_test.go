@@ -48,6 +48,72 @@ func TestInferenceDefaults(t *testing.T) {
 	}
 }
 
+func TestInferenceResolveBackend(t *testing.T) {
+	global := OpenAICompat{
+		URL:               "https://global.example.test",
+		Token:             "global-token",
+		FastModel:         "global-model",
+		MaxResponseTokens: 4096,
+	}
+	tests := []struct {
+		name      string
+		inference Inference
+		wantURL   string
+		wantToken string
+	}{
+		{
+			name:      "inherits global backend",
+			inference: Inference{},
+			wantURL:   global.URL,
+			wantToken: global.Token,
+		},
+		{
+			name:      "overrides URL only",
+			inference: Inference{URL: "https://inference.example.test"},
+			wantURL:   "https://inference.example.test",
+			wantToken: global.Token,
+		},
+		{
+			name:      "overrides token only",
+			inference: Inference{Token: "inference-token"},
+			wantURL:   global.URL,
+			wantToken: "inference-token",
+		},
+		{
+			name: "overrides URL and token",
+			inference: Inference{
+				URL:   "https://inference.example.test",
+				Token: "inference-token",
+			},
+			wantURL:   "https://inference.example.test",
+			wantToken: "inference-token",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			backend := test.inference.ResolveBackend(global)
+
+			if backend.URL != test.wantURL {
+				t.Fatalf("url=%q, want %q", backend.URL, test.wantURL)
+			}
+			if backend.Token != test.wantToken {
+				t.Fatalf("token=%q, want configured token", backend.Token)
+			}
+			if backend.FastModel != global.FastModel {
+				t.Fatalf("fast_model=%q, want %q", backend.FastModel, global.FastModel)
+			}
+			if backend.MaxResponseTokens != global.MaxResponseTokens {
+				t.Fatalf(
+					"max_response_tokens=%d, want %d",
+					backend.MaxResponseTokens,
+					global.MaxResponseTokens,
+				)
+			}
+		})
+	}
+}
+
 func TestResolveChatSettings(t *testing.T) {
 	topP := 0.8
 	topK := 20
