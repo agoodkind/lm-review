@@ -162,9 +162,16 @@ func readListenerPIDs(ctx context.Context, listenAddress string, expectedPID int
 
 func readListenerPIDsFromLsof(ctx context.Context, host string, port string) ([]int, error) {
 	slog.DebugContext(ctx, "inference.service_check.lsof.begin", "port", port)
-	lsofHost := host
-	if strings.Contains(host, ":") {
-		lsofHost = "[" + host + "]"
+	localAddress, err := netip.ParseAddr(host)
+	if err != nil {
+		return nil, fmt.Errorf("parse lsof listener address: %w", err)
+	}
+	selector := "-iTCP@" + host + ":" + port
+	if localAddress.Is6() {
+		selector = "-iTCP@[" + host + "]:" + port
+	}
+	if localAddress.IsUnspecified() && localAddress.Is6() {
+		selector = "-i6TCP:" + port
 	}
 	// #nosec G204 -- host is a parsed literal address and port is rendered canonically.
 	command := exec.CommandContext(
@@ -172,7 +179,7 @@ func readListenerPIDsFromLsof(ctx context.Context, host string, port string) ([]
 		"lsof",
 		"-nP",
 		"-t",
-		"-iTCP@"+lsofHost+":"+port,
+		selector,
 		"-sTCP:LISTEN",
 	)
 	output, err := command.Output()

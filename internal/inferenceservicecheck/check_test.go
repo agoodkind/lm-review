@@ -3,6 +3,11 @@ package inferenceservicecheck
 import (
 	"context"
 	"errors"
+	"net"
+	"os"
+	"os/exec"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -88,6 +93,39 @@ func TestReadListenerPIDsRejectsHostname(t *testing.T) {
 	_, err := readListenerPIDs(context.Background(), "localhost:5401", 0)
 	if err == nil || !strings.Contains(err.Error(), "literal IPv4 or IPv6") {
 		t.Fatalf("error=%v, want literal address requirement", err)
+	}
+}
+
+func TestReadListenerPIDsFromLsofMatchesIPv6Wildcard(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("lsof listener ownership is Darwin-specific")
+	}
+	if _, err := exec.LookPath("lsof"); err != nil {
+		t.Skip("lsof is not available")
+	}
+	listener, err := net.Listen("tcp6", "[::]:0")
+	if err != nil {
+		t.Skipf("IPv6 wildcard listener is unavailable: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := listener.Close(); closeErr != nil {
+			t.Errorf("close listener: %v", closeErr)
+		}
+	})
+	tcpAddress, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener address type=%T, want *net.TCPAddr", listener.Addr())
+	}
+	processIDs, err := readListenerPIDsFromLsof(
+		context.Background(),
+		"::",
+		strconv.Itoa(tcpAddress.Port),
+	)
+	if err != nil {
+		t.Fatalf("readListenerPIDsFromLsof returned error: %v", err)
+	}
+	if len(processIDs) != 1 || processIDs[0] != os.Getpid() {
+		t.Fatalf("process IDs=%v, want [%d]", processIDs, os.Getpid())
 	}
 }
 
