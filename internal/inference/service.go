@@ -68,6 +68,10 @@ type ModelResult struct {
 	TotalTokensPresent      bool
 	FinishReason            string
 	Latency                 time.Duration
+	// Confidence is a token-logprob-derived confidence in [0, 1], present only
+	// when the backend returned per-token logprobs.
+	Confidence        float64
+	ConfidencePresent bool
 }
 
 // ModelClient performs one schema-driven inference call.
@@ -208,6 +212,7 @@ func (s *Server) Infer(ctx context.Context, request *inferencepb.InferRequest) (
 			OutputNormalized:  outputNormalized,
 			NormalizationKind: normalizationKind,
 			RawOutputSha256:   sha256Hex(result.Output),
+			Confidence:        optionalFloat64(result.Confidence, result.ConfidencePresent),
 		},
 	}, nil
 }
@@ -280,6 +285,13 @@ func copyFloat64(value *float64) *float64 {
 }
 
 func optionalInt64(value int64, present bool) *int64 {
+	if !present {
+		return nil
+	}
+	return &value
+}
+
+func optionalFloat64(value float64, present bool) *float64 {
 	if !present {
 		return nil
 	}
@@ -419,5 +431,7 @@ func (c *openAICompatibleClient) Infer(ctx context.Context, request ModelRequest
 		TotalTokensPresent:      result.TotalTokensPresent,
 		FinishReason:            result.FinishReason,
 		Latency:                 result.Latency,
+		Confidence:              result.Confidence,
+		ConfidencePresent:       result.ConfidencePresent,
 	}, nil
 }

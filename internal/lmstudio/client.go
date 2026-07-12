@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -66,6 +67,10 @@ type ChatResult struct {
 	TotalTokensPresent      bool
 	FinishReason            string
 	Latency                 time.Duration
+	// Confidence is a token-logprob-derived confidence in [0, 1], present only
+	// when the backend returned per-token logprobs.
+	Confidence        float64
+	ConfidencePresent bool
 }
 
 // New creates a Client targeting the given OpenAI-compatible base URL with the provided token.
@@ -188,6 +193,8 @@ func (c *Client) chatDetailed(
 			TotalTokensPresent:      false,
 			FinishReason:            "",
 			Latency:                 0,
+			Confidence:              0,
+			ConfidencePresent:       false,
 		}, err
 	}
 	log.InfoContext(ctx, "openai.chat.end",
@@ -205,6 +212,7 @@ func (c *Client) chatDetailed(
 		)
 	}
 	usagePresence := parseTokenUsagePresence(resp.RawJSON())
+	confidence, confidencePresent := logprobConfidence(resp.Choices[0].Logprobs)
 	return ChatResult{
 		Content:                 content,
 		RequestID:               requestID,
@@ -220,7 +228,40 @@ func (c *Client) chatDetailed(
 		TotalTokensPresent:      usagePresence.total,
 		FinishReason:            resp.Choices[0].FinishReason,
 		Latency:                 latency,
+		Confidence:              confidence,
+		ConfidencePresent:       confidencePresent,
 	}, nil
+}
+
+// logprobConfidence derives a confidence in [0, 1] from per-token logprobs. It
+// returns the probability of the least-certain content token (exp of the minimum
+// logprob). For a short structured decision output the least-certain token is the
+// decision value rather than the near-certain JSON scaffolding, so this tracks
+// the decision. It returns present=false when the backend returned no logprobs,
+// for example a local backend that does not support them.
+func logprobConfidence(logprobs openai.ChatCompletionChoiceLogprobs) (float64, bool) {
+	tokens := logprobs.Content
+	if len(tokens) == 0 {
+		return 0, false
+	}
+	values := make([]float64, len(tokens))
+	for index, token := range tokens {
+		values[index] = token.Logprob
+	}
+	return minLogprobConfidence(values), true
+}
+
+// minLogprobConfidence maps a non-empty slice of per-token logprobs to a
+// confidence in [0, 1]: the probability of the least-certain token, exp of the
+// minimum logprob, clamped to the valid range.
+func minLogprobConfidence(logprobs []float64) float64 {
+	minLogprob := logprobs[0]
+	for _, value := range logprobs[1:] {
+		if value < minLogprob {
+			minLogprob = value
+		}
+	}
+	return math.Min(1, math.Max(0, math.Exp(minLogprob)))
 }
 
 type tokenUsagePresence struct {
@@ -382,6 +423,10 @@ func (c *Client) chatParams(
 			openai.SystemMessage(systemPrompt),
 			openai.UserMessage(userMessage),
 		},
+		// Request per-token logprobs so a logprob-derived confidence is available.
+		// Backends that do not support logprobs ignore this and return none, and
+		// the confidence is then simply reported as absent.
+		Logprobs: param.NewOpt(true),
 	}
 	if schemaOptions != nil {
 		maxCompletionTokens := c.maxTokens
