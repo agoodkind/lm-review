@@ -442,7 +442,10 @@ func (c *Client) chatParams(
 		}
 	} else {
 		params.Temperature = param.NewOpt(c.settings.Temperature)
-		params.MaxTokens = param.NewOpt[int64](c.maxTokens)
+		// Use the standard OpenAI schema field. max_tokens is deprecated and is
+		// rejected by newer models (for example gpt-5.4-mini), so the whole client
+		// speaks max_completion_tokens, which is the point of using the SDK.
+		params.MaxCompletionTokens = param.NewOpt[int64](c.maxTokens)
 	}
 	if schemaOptions == nil && c.settings.TopP != nil {
 		params.TopP = param.NewOpt(*c.settings.TopP)

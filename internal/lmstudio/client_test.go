@@ -83,14 +83,11 @@ func TestChatSchemaSendsCallerSchemaInStrictMode(t *testing.T) {
 	if !reflect.DeepEqual(gotSchema, wantSchema) {
 		t.Fatalf("schema=%#v, want %#v", gotSchema, wantSchema)
 	}
-	if got := requireFloat64(t, requestBody["max_tokens"], "max_tokens"); got != 256 {
-		t.Fatalf("max_tokens=%v, want 256", got)
+	if got := requireFloat64(t, requestBody["max_completion_tokens"], "max_completion_tokens"); got != 256 {
+		t.Fatalf("max_completion_tokens=%v, want 256", got)
 	}
-	if _, ok := requestBody["max_completion_tokens"]; ok {
-		t.Fatalf(
-			"max_completion_tokens=%v, want omitted",
-			requestBody["max_completion_tokens"],
-		)
+	if _, ok := requestBody["max_tokens"]; ok {
+		t.Fatalf("max_tokens=%v, want omitted", requestBody["max_tokens"])
 	}
 }
 
