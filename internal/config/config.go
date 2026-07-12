@@ -37,12 +37,100 @@ type Config struct {
 }
 
 // Inference holds settings for the standalone inference gRPC service.
+//
+// A single top-level backend is configured with base_url plus token or
+// token_file. To serve several models from different backends in one daemon,
+// declare one or more [[inference.backend]] entries instead; each names the
+// models it serves and its own base_url and credential.
 type Inference struct {
-	Model         string `toml:"model,omitempty"`
-	ListenAddress string `toml:"listen_address,omitempty"`
-	BaseURL       string `toml:"base_url,omitempty"`
-	Token         string `toml:"token,omitempty"`
-	TokenFile     string `toml:"token_file,omitempty"`
+	Model         string             `toml:"model,omitempty"`
+	ListenAddress string             `toml:"listen_address,omitempty"`
+	BaseURL       string             `toml:"base_url,omitempty"`
+	Token         string             `toml:"token,omitempty"`
+	TokenFile     string             `toml:"token_file,omitempty"`
+	Backends      []InferenceBackend `toml:"backend,omitempty"`
+}
+
+// InferenceBackend is one model-routed backend for the inference service. The
+// inference daemon sends a request for any model in Models to this backend's
+// base_url with its credential, so one daemon can serve a local model and a
+// hosted model at once.
+type InferenceBackend struct {
+	Models    []string `toml:"models"`
+	BaseURL   string   `toml:"base_url"`
+	Token     string   `toml:"token,omitempty"`
+	TokenFile string   `toml:"token_file,omitempty"`
+}
+
+// ResolvedInferenceBackend pairs a backend's resolved connection settings with
+// the models it serves.
+type ResolvedInferenceBackend struct {
+	Models  []string
+	Backend OpenAICompat
+}
+
+// Resolve applies this backend's URL and credential to a copy of the global
+// OpenAI-compatible settings, reading token_file when set. The global settings
+// supply the shared knobs (max response tokens, request timeout, chat settings)
+// that a per-model backend does not override.
+func (b InferenceBackend) Resolve(global OpenAICompat) (OpenAICompat, error) {
+	if b.BaseURL == "" {
+		return OpenAICompat{}, errors.New("inference backend base_url is required")
+	}
+	if len(b.Models) == 0 {
+		return OpenAICompat{}, errors.New("inference backend requires at least one model")
+	}
+	if b.Token != "" && b.TokenFile != "" {
+		return OpenAICompat{}, errors.New("inference backend token and token_file are mutually exclusive")
+	}
+	backend := global
+	backend.URL = b.BaseURL
+	backend.Token = b.Token
+	if b.TokenFile == "" {
+		return backend, nil
+	}
+	tokenPath, err := resolveTokenFilePath(xdg.ConfigPath(), b.TokenFile)
+	if err != nil {
+		return OpenAICompat{}, err
+	}
+	token, err := readInferenceTokenFile(tokenPath)
+	if err != nil {
+		return OpenAICompat{}, err
+	}
+	backend.Token = token
+	return backend, nil
+}
+
+// ResolveBackends returns each configured [[inference.backend]] paired with the
+// models it serves, resolving credentials. It returns nil when no backends are
+// declared, so the caller falls back to the single-backend shorthand. Every
+// model id must be non-empty and belong to exactly one backend.
+func (i Inference) ResolveBackends(global OpenAICompat) ([]ResolvedInferenceBackend, error) {
+	if len(i.Backends) == 0 {
+		return nil, nil
+	}
+	resolved := make([]ResolvedInferenceBackend, 0, len(i.Backends))
+	seen := make(map[string]struct{})
+	for _, backend := range i.Backends {
+		settings, err := backend.Resolve(global)
+		if err != nil {
+			return nil, err
+		}
+		for _, model := range backend.Models {
+			if strings.TrimSpace(model) == "" {
+				return nil, errors.New("inference backend model id must not be empty")
+			}
+			if _, duplicate := seen[model]; duplicate {
+				return nil, fmt.Errorf("inference backend model %q is configured more than once", model)
+			}
+			seen[model] = struct{}{}
+		}
+		resolved = append(resolved, ResolvedInferenceBackend{
+			Models:  append([]string{}, backend.Models...),
+			Backend: settings,
+		})
+	}
+	return resolved, nil
 }
 
 // ResolveModel returns the configured inference model id.

@@ -80,20 +80,59 @@ type ModelClient interface {
 }
 
 // Server implements the generic inference.v1 Inference service.
+//
+// A server routes each request to a backend by model. With a single backend the
+// backends map is nil and every request goes to modelClient. With per-model
+// backends the backends map selects the client, and a request for a model with
+// no backend fails with FailedPrecondition.
 type Server struct {
 	inferencepb.UnimplementedInferenceServer
 	defaultModel   string
 	modelClient    ModelClient
+	backends       map[string]ModelClient
 	serviceVersion string
 }
 
-// NewServer creates an inference server backed by modelClient.
+// NewServer creates an inference server backed by a single modelClient for
+// every request.
 func NewServer(defaultModel string, modelClient ModelClient) *Server {
 	return &Server{
 		UnimplementedInferenceServer: inferencepb.UnimplementedInferenceServer{},
 		defaultModel:                 defaultModel,
 		modelClient:                  modelClient,
+		backends:                     nil,
 		serviceVersion:               version.Version + "+" + version.Commit,
+	}
+}
+
+// NewRoutingServer creates an inference server that selects a backend by the
+// request's model. A request for a model absent from backends fails with
+// FailedPrecondition.
+func NewRoutingServer(defaultModel string, backends map[string]ModelClient) *Server {
+	return &Server{
+		UnimplementedInferenceServer: inferencepb.UnimplementedInferenceServer{},
+		defaultModel:                 defaultModel,
+		modelClient:                  nil,
+		backends:                     backends,
+		serviceVersion:               version.Version + "+" + version.Commit,
+	}
+}
+
+// NewOpenAICompatibleClient builds a model client for one OpenAI-compatible
+// backend. Use it to assemble the per-model backends passed to NewRoutingServer.
+func NewOpenAICompatibleClient(
+	baseURL string,
+	token string,
+	maxTokens int,
+	requestTimeout time.Duration,
+	settings config.ChatSettings,
+) ModelClient {
+	return &openAICompatibleClient{
+		baseURL:        baseURL,
+		token:          token,
+		maxTokens:      maxTokens,
+		requestTimeout: requestTimeout,
+		settings:       settings,
 	}
 }
 
@@ -106,14 +145,28 @@ func NewOpenAICompatibleServer(
 	requestTimeout time.Duration,
 	settings config.ChatSettings,
 ) *Server {
-	client := &openAICompatibleClient{
-		baseURL:        baseURL,
-		token:          token,
-		maxTokens:      maxTokens,
-		requestTimeout: requestTimeout,
-		settings:       settings,
-	}
+	client := NewOpenAICompatibleClient(baseURL, token, maxTokens, requestTimeout, settings)
 	return NewServer(defaultModel, client)
+}
+
+// clientForModel returns the backend client for model. With per-model backends
+// an unmapped model is a FailedPrecondition; with a single backend the model
+// client is used when configured.
+func (s *Server) clientForModel(model string) (ModelClient, error) {
+	if len(s.backends) > 0 {
+		client, ok := s.backends[model]
+		if !ok {
+			return nil, status.Error(
+				codes.FailedPrecondition,
+				fmt.Sprintf("model %q has no configured backend", model),
+			)
+		}
+		return client, nil
+	}
+	if s.modelClient == nil {
+		return nil, status.Error(codes.FailedPrecondition, "model client is not configured")
+	}
+	return s.modelClient, nil
 }
 
 // Infer validates the declaration, invokes the model, and validates its output.
@@ -132,9 +185,6 @@ func (s *Server) Infer(ctx context.Context, request *inferencepb.InferRequest) (
 	if contextValue := request.GetContext(); contextValue != "" && !json.Valid([]byte(contextValue)) {
 		return nil, status.Error(codes.InvalidArgument, "context must be valid JSON")
 	}
-	if s.modelClient == nil {
-		return nil, status.Error(codes.FailedPrecondition, "model client is not configured")
-	}
 	generationOptions, err := generationOptionsFromProto(request.GetGenerationOptions())
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -147,7 +197,11 @@ func (s *Server) Infer(ctx context.Context, request *inferencepb.InferRequest) (
 	if model == "" {
 		return nil, status.Error(codes.FailedPrecondition, "model is not configured")
 	}
-	result, err := s.modelClient.Infer(ctx, ModelRequest{
+	modelClient, err := s.clientForModel(model)
+	if err != nil {
+		return nil, err
+	}
+	result, err := modelClient.Infer(ctx, ModelRequest{
 		Model:             model,
 		Prompt:            request.GetPrompt(),
 		Input:             request.GetInput(),
