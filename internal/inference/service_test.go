@@ -527,6 +527,64 @@ func metadataBoolField(
 	return metadata.ProtoReflect().Get(field).Bool()
 }
 
+func withModel(request *inferencepb.InferRequest, model string) *inferencepb.InferRequest {
+	request.Model = model
+	return request
+}
+
+func TestRoutingServerSelectsBackendByModel(t *testing.T) {
+	const miniModel = "gpt-5.4-mini"
+	const v4Model = "agentgate/agent-gate-judge-v4"
+	var miniCalls, v4Calls atomic.Int32
+	backends := map[string]ModelClient{
+		miniModel: modelFunc(func(_ context.Context, call ModelRequest) (ModelResult, error) {
+			miniCalls.Add(1)
+			if call.Model != miniModel {
+				t.Errorf("mini backend saw model %q", call.Model)
+			}
+			return modelOutput(`{"decision":"block"}`), nil
+		}),
+		v4Model: modelFunc(func(_ context.Context, call ModelRequest) (ModelResult, error) {
+			v4Calls.Add(1)
+			if call.Model != v4Model {
+				t.Errorf("v4 backend saw model %q", call.Model)
+			}
+			return modelOutput(`{"decision":"allow"}`), nil
+		}),
+	}
+	server := NewRoutingServer("", backends)
+
+	miniReply, err := server.Infer(context.Background(), withModel(validRequest(decisionSchema), miniModel))
+	if err != nil {
+		t.Fatalf("mini Infer error: %v", err)
+	}
+	if miniReply.GetOutputJson() != `{"decision":"block"}` {
+		t.Fatalf("mini output=%q, want block", miniReply.GetOutputJson())
+	}
+	v4Reply, err := server.Infer(context.Background(), withModel(validRequest(decisionSchema), v4Model))
+	if err != nil {
+		t.Fatalf("v4 Infer error: %v", err)
+	}
+	if v4Reply.GetOutputJson() != `{"decision":"allow"}` {
+		t.Fatalf("v4 output=%q, want allow", v4Reply.GetOutputJson())
+	}
+	if miniCalls.Load() != 1 || v4Calls.Load() != 1 {
+		t.Fatalf("mini calls=%d v4 calls=%d, want 1 each", miniCalls.Load(), v4Calls.Load())
+	}
+}
+
+func TestRoutingServerUnknownModelFailsPrecondition(t *testing.T) {
+	server := NewRoutingServer("", map[string]ModelClient{
+		"known": modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+			return modelOutput(`{"decision":"allow"}`), nil
+		}),
+	})
+	_, err := server.Infer(context.Background(), withModel(validRequest(decisionSchema), "unknown-model"))
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("code=%s, want FailedPrecondition (err=%v)", status.Code(err), err)
+	}
+}
+
 func int64Pointer(value int64) *int64 {
 	return &value
 }

@@ -54,6 +54,108 @@ func TestInferenceDefaults(t *testing.T) {
 	}
 }
 
+func TestInferenceResolveBackendsRoutesByModel(t *testing.T) {
+	var cfg struct {
+		OpenAICompat OpenAICompat `toml:"openai_compat"`
+		Inference    Inference    `toml:"inference"`
+	}
+	_, err := toml.Decode(`[openai_compat]
+url = "http://global.example.test"
+token = "global-token"
+max_response_tokens = 4096
+
+[[inference.backend]]
+models = ["gpt-5.4-mini"]
+base_url = "https://api.openai.com"
+token = "openai-token"
+
+[[inference.backend]]
+models = ["agentgate/agent-gate-judge-v4"]
+base_url = "http://localhost:5400"
+`, &cfg)
+	if err != nil {
+		t.Fatalf("decode TOML: %v", err)
+	}
+	resolved, err := cfg.Inference.ResolveBackends(cfg.OpenAICompat)
+	if err != nil {
+		t.Fatalf("ResolveBackends returned error: %v", err)
+	}
+	if len(resolved) != 2 {
+		t.Fatalf("resolved backends=%d, want 2", len(resolved))
+	}
+	byModel := make(map[string]OpenAICompat)
+	for _, backend := range resolved {
+		for _, model := range backend.Models {
+			byModel[model] = backend.Backend
+		}
+	}
+	mini, ok := byModel["gpt-5.4-mini"]
+	if !ok {
+		t.Fatal("gpt-5.4-mini has no resolved backend")
+	}
+	if mini.URL != "https://api.openai.com" || mini.Token != "openai-token" {
+		t.Fatalf("mini backend URL=%q token=%q, want OpenAI URL + token", mini.URL, mini.Token)
+	}
+	if mini.ResolveMaxResponseTokens() != 4096 {
+		t.Fatalf("mini max response tokens=%d, want inherited 4096", mini.ResolveMaxResponseTokens())
+	}
+	v4, ok := byModel["agentgate/agent-gate-judge-v4"]
+	if !ok {
+		t.Fatal("v4 model has no resolved backend")
+	}
+	if v4.URL != "http://localhost:5400" || v4.Token != "" {
+		t.Fatalf("v4 backend URL=%q token=%q, want lmd URL + no token", v4.URL, v4.Token)
+	}
+}
+
+func TestInferenceResolveBackendsRejectsDuplicateModel(t *testing.T) {
+	var cfg struct {
+		Inference Inference `toml:"inference"`
+	}
+	_, err := toml.Decode(`[[inference.backend]]
+models = ["m"]
+base_url = "http://a.example.test"
+
+[[inference.backend]]
+models = ["m"]
+base_url = "http://b.example.test"
+`, &cfg)
+	if err != nil {
+		t.Fatalf("decode TOML: %v", err)
+	}
+	if _, err := cfg.Inference.ResolveBackends(OpenAICompat{}); err == nil {
+		t.Fatal("expected duplicate-model error, got nil")
+	}
+}
+
+func TestInferenceResolveBackendsRejectsTokenAndTokenFile(t *testing.T) {
+	var cfg struct {
+		Inference Inference `toml:"inference"`
+	}
+	_, err := toml.Decode(`[[inference.backend]]
+models = ["m"]
+base_url = "http://a.example.test"
+token = "t"
+token_file = "f"
+`, &cfg)
+	if err != nil {
+		t.Fatalf("decode TOML: %v", err)
+	}
+	if _, err := cfg.Inference.ResolveBackends(OpenAICompat{}); err == nil {
+		t.Fatal("expected token/token_file mutual-exclusion error, got nil")
+	}
+}
+
+func TestInferenceResolveBackendsEmptyFallsBackToShorthand(t *testing.T) {
+	resolved, err := Inference{}.ResolveBackends(OpenAICompat{})
+	if err != nil {
+		t.Fatalf("ResolveBackends returned error: %v", err)
+	}
+	if resolved != nil {
+		t.Fatalf("resolved=%v, want nil so the single-backend shorthand is used", resolved)
+	}
+}
+
 func TestInferenceResolveBackend(t *testing.T) {
 	global := OpenAICompat{
 		URL:               "https://global.example.test",

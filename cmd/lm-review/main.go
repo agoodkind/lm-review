@@ -256,15 +256,28 @@ func newInferenceCmd() *cobra.Command {
 			if model == "" {
 				model = cfg.Inference.ResolveModel()
 			}
-			effectiveBackend, err := cfg.Inference.ResolveBackendCredential(cfg.OpenAICompat)
+			routedBackends, err := cfg.Inference.ResolveBackends(cfg.OpenAICompat)
 			if err != nil {
 				log.ErrorContext(cmd.Context(), "inference.backend.resolve_failed", "err", err)
 				return fmt.Errorf("resolve inference backend: %w", err)
 			}
-			log.InfoContext(cmd.Context(), "inference.serve.begin",
-				"listen_address", listenAddress,
-				"model", model)
-			server := newInferenceServer(effectiveBackend, model)
+			var server *inference.Server
+			if len(routedBackends) > 0 {
+				log.InfoContext(cmd.Context(), "inference.serve.begin",
+					"listen_address", listenAddress,
+					"backends", len(routedBackends))
+				server = newRoutingInferenceServer(model, routedBackends)
+			} else {
+				effectiveBackend, err := cfg.Inference.ResolveBackendCredential(cfg.OpenAICompat)
+				if err != nil {
+					log.ErrorContext(cmd.Context(), "inference.backend.resolve_failed", "err", err)
+					return fmt.Errorf("resolve inference backend: %w", err)
+				}
+				log.InfoContext(cmd.Context(), "inference.serve.begin",
+					"listen_address", listenAddress,
+					"model", model)
+				server = newInferenceServer(effectiveBackend, model)
+			}
 			err = inference.Serve(cmd.Context(), listenAddress, server)
 			if err != nil {
 				log.ErrorContext(cmd.Context(), "inference.serve.failed", "err", err)
@@ -287,6 +300,28 @@ func newInferenceServer(backend config.OpenAICompat, model string) *inference.Se
 		backend.ResolveRequestTimeout(),
 		backend.ResolveChatSettings(),
 	)
+}
+
+// newRoutingInferenceServer builds an inference server that routes each request
+// to the backend registered for its model.
+func newRoutingInferenceServer(
+	model string,
+	backends []config.ResolvedInferenceBackend,
+) *inference.Server {
+	clients := make(map[string]inference.ModelClient)
+	for _, resolved := range backends {
+		client := inference.NewOpenAICompatibleClient(
+			resolved.Backend.URL,
+			resolved.Backend.Token,
+			resolved.Backend.ResolveMaxResponseTokens(),
+			resolved.Backend.ResolveRequestTimeout(),
+			resolved.Backend.ResolveChatSettings(),
+		)
+		for _, modelID := range resolved.Models {
+			clients[modelID] = client
+		}
+	}
+	return inference.NewRoutingServer(model, clients)
 }
 
 func newInferenceServiceCheckCmd() *cobra.Command {
