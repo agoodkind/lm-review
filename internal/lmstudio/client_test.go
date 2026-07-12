@@ -509,3 +509,31 @@ func expiredChatContext() context.Context {
 	cancel()
 	return ctx
 }
+
+// TestMinLogprobConfidence confirms the confidence is the probability of the
+// least-certain token (exp of the minimum logprob), clamped to [0, 1].
+func TestMinLogprobConfidence(t *testing.T) {
+	cases := []struct {
+		name     string
+		logprobs []float64
+		want     float64
+	}{
+		{name: "all certain", logprobs: []float64{0, 0, 0}, want: 1},
+		{name: "min governs", logprobs: []float64{-0.01, -0.7, -0.02}, want: 0.4965853},
+		{name: "very uncertain token", logprobs: []float64{-0.001, -5}, want: 0.0067379},
+		{name: "single token", logprobs: []float64{-0.2231435}, want: 0.8},
+	}
+	const tolerance = 1e-6
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := minLogprobConfidence(testCase.logprobs)
+			difference := got - testCase.want
+			if difference < 0 {
+				difference = -difference
+			}
+			if difference > tolerance {
+				t.Fatalf("minLogprobConfidence(%v) = %v, want %v", testCase.logprobs, got, testCase.want)
+			}
+		})
+	}
+}
