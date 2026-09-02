@@ -13,7 +13,7 @@ require (
 	golang.org/x/tools v0.47.0
 	goodkind.io/gklog v0.4.4
 	goodkind.io/go-makefile/selfupdate v0.0.0-20260703131438-3686db04d57e
-	google.golang.org/grpc v1.82.1
+	google.golang.org/grpc v1.83.1
 	google.golang.org/protobuf v1.36.11
 	honnef.co/go/tools v0.7.0
 )
