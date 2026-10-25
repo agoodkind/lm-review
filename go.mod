@@ -2,6 +2,8 @@ module goodkind.io/lm-review
 
 go 1.27
 
+toolchain go1.27.3
+
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/mark3labs/mcp-go/v2 v2.0.0
