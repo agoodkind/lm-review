@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/mark3labs/mcp-go/v2/mcp"
+	"github.com/mark3labs/mcp-go/v2/server"
 
 	"goodkind.io/gklog"
 	"goodkind.io/lm-review/api/reviewpb"
@@ -39,7 +39,12 @@ func Serve(ctx context.Context) error {
 	addReviewTool(s, depthFlag, modelFlag)
 	addStaticTool(s, depthFlag, modelFlag)
 
-	return server.ServeStdio(s)
+	if err := server.ServeStdio(s); err != nil {
+		log := gklog.LoggerFromContext(ctx)
+		log.ErrorContext(ctx, "mcp.stdio.failed", "err", err)
+		return fmt.Errorf("serve MCP stdio: %w", err)
+	}
+	return nil
 }
 
 func addGettingStartedResource(s *server.MCPServer) {
