@@ -57,6 +57,7 @@ Use --json for machine-readable output (useful when called by an agent).`,
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite existing config")
 	cmd.Flags().StringVar(&token, "token", "", "API token for the LLM backend")
 	cmd.Flags().StringVar(&url, "url", "", "Explicit backend URL (skips auto-detection)")
+
 	return cmd
 }
 
@@ -68,7 +69,10 @@ func runInit(cmd *cobra.Command, force, jsonOut bool, token, url string) error {
 	if !force {
 		_, statErr := os.Stat(configPath)
 		if statErr == nil {
-			cmd.PrintErrf("config already exists at %s\nUse --force to overwrite, or edit directly.\n", configPath)
+			cmd.PrintErrf(
+				"config already exists at %s\nUse --force to overwrite, or edit directly.\n",
+				configPath,
+			)
 			return nil
 		}
 	}
@@ -111,6 +115,7 @@ func runInit(cmd *cobra.Command, force, jsonOut bool, token, url string) error {
 		if encErr != nil {
 			return fmt.Errorf("encode json: %w", encErr)
 		}
+
 		return nil
 	}
 
@@ -118,6 +123,7 @@ func runInit(cmd *cobra.Command, force, jsonOut bool, token, url string) error {
 	cmd.Printf("backend:    %s (%s)\n", result.Backend, result.URL)
 	cmd.Printf("fast model: %s\n", result.FastModel)
 	cmd.Printf("deep model: %s\n", result.DeepModel)
+
 	return nil
 }
 
@@ -130,13 +136,19 @@ func resolveInitBackend(ctx context.Context, url, token string) (*lmstudio.Backe
 			slog.ErrorContext(ctx, "lm-review.init.list_models_failed", "url", url, "err", lerr)
 			return nil, fmt.Errorf("cannot reach %s: %w", url, lerr)
 		}
+
 		return &lmstudio.Backend{Name: "custom", URL: url, Token: token, Models: models}, nil
 	}
+
 	backend, err := lmstudio.Detect(ctx, token)
 	if err != nil {
 		slog.ErrorContext(ctx, "lm-review.init.detect_failed", "err", err)
-		return nil, fmt.Errorf("%w\n\nStart your LLM backend, then re-run.\nOr specify explicitly: lm-review init --url <url> --token <token>", err)
+		return nil, fmt.Errorf(
+			"%w\n\nStart your LLM backend, then re-run.\nOr specify explicitly: lm-review init --url <url> --token <token>",
+			err,
+		)
 	}
+
 	return backend, nil
 }
 
@@ -145,7 +157,9 @@ func writeConfig(path, url, token, fastModel, deepModel string) error {
 	if mkErr != nil {
 		return fmt.Errorf("mkdir config dir: %w", mkErr)
 	}
-	content := fmt.Sprintf(`[openai_compat]
+
+	content := fmt.Sprintf(
+		`[openai_compat]
 url        = %q
 token      = %q
 fast_model = %q
@@ -157,10 +171,18 @@ listen_address = %q
 # base_url = "https://inference.example.com"
 # token_file = "~/.config/lm-review/inference.token" # preferred; regular file with mode 0600
 # token = "replace-with-inference-token"
-`, url, token, fastModel, deepModel, fastModel, config.DefaultInferenceListenAddress)
+`,
+		url,
+		token,
+		fastModel,
+		deepModel,
+		fastModel,
+		config.DefaultInferenceListenAddress,
+	)
 	writeErr := os.WriteFile(path, []byte(content), 0o600)
 	if writeErr != nil {
 		return fmt.Errorf("write file: %w", writeErr)
 	}
+
 	return nil
 }

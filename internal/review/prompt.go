@@ -143,12 +143,14 @@ func FilesFromDiff(diff string) []string {
 	matches := reDiffFile.FindAllStringSubmatch(diff, -1)
 	seen := make(map[string]bool)
 	var files []string
+
 	for _, m := range matches {
 		if !seen[m[1]] {
 			seen[m[1]] = true
 			files = append(files, m[1])
 		}
 	}
+
 	return files
 }
 
@@ -160,16 +162,19 @@ func ruleApplies(globs []string, always bool, files []string) bool {
 	if always || len(globs) == 0 {
 		return true
 	}
-	for _, g := range globs {
+
+	for _, globPattern := range globs {
 		for _, f := range files {
-			if matched, _ := filepath.Match(g, filepath.Base(f)); matched {
+			if matched, _ := filepath.Match(globPattern, filepath.Base(f)); matched {
 				return true
 			}
-			if matched, _ := filepath.Match(g, f); matched {
+
+			if matched, _ := filepath.Match(globPattern, f); matched {
 				return true
 			}
 		}
 	}
+
 	return false
 }
 
@@ -180,6 +185,7 @@ func buildPrompt(header string, rules []string, schema string) string {
 
 	if len(rules) > 0 {
 		sb.WriteString("\n\nRules to enforce:\n")
+
 		for _, r := range rules {
 			sb.WriteString("- ")
 			sb.WriteString(r)
@@ -188,6 +194,7 @@ func buildPrompt(header string, rules []string, schema string) string {
 	}
 
 	sb.WriteString(schema)
+
 	return sb.String()
 }
 
@@ -226,10 +233,12 @@ func FilterRules(ruleTexts []string, filters []RuleFilter, files []string) []str
 		if i < len(filters) {
 			f = filters[i]
 		}
+
 		if ruleApplies(f.Globs, f.Always, files) {
 			out = append(out, text)
 		}
 	}
+
 	return out
 }
 
@@ -248,7 +257,9 @@ func ChunkPrompt(files string, chunkNum, totalChunks int) string {
 	return fmt.Sprintf(
 		"Review chunk %d of %d of this codebase. Focus on issues within this chunk; "+
 			"note cross-chunk concerns in tech_debt:\n\n%s",
-		chunkNum, totalChunks, files,
+		chunkNum,
+		totalChunks,
+		files,
 	)
 }
 
@@ -257,19 +268,25 @@ func DiffChunkPrompt(diff string, chunkNum, totalChunks int) string {
 	return fmt.Sprintf(
 		"Review chunk %d of %d of this diff. Focus on issues within this chunk; "+
 			"note cross-chunk concerns in tech_debt:\n\n```diff\n%s\n```",
-		chunkNum, totalChunks, diff,
+		chunkNum,
+		totalChunks,
+		diff,
 	)
 }
 
 // StaticPrompt builds the user message for synthesized static review.
 func StaticPrompt(files string, analyzerSection string) string {
 	var sb strings.Builder
-	sb.WriteString("Review this codebase using the static-analysis findings below. Prioritize real issues and collapse overlaps.\n\n")
+	sb.WriteString(
+		"Review this codebase using the static-analysis findings below. Prioritize real issues and collapse overlaps.\n\n",
+	)
 	if analyzerSection != "" {
 		sb.WriteString(analyzerSection)
 		sb.WriteString("\n")
 	}
+
 	sb.WriteString("CODE:\n\n")
 	sb.WriteString(files)
+
 	return sb.String()
 }

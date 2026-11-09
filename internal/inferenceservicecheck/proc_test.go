@@ -15,13 +15,19 @@ const procTCPHeader = "  sl  local_address rem_address   st tx_queue rx_queue tr
 func TestReadListenerPIDsFromProcMatchesConfiguredIPv4Loopback(t *testing.T) {
 	procRoot := t.TempDir()
 	writeProcTable(t, procRoot, "tcp", procTCPLine("0100007F", "1519", "0A", 4101))
-	writeProcTable(t, procRoot, "tcp6", procTCPLine(strings.Repeat("0", 31)+"1", "1519", "0A", 4102))
+	writeProcTable(
+		t,
+		procRoot,
+		"tcp6",
+		procTCPLine(strings.Repeat("0", 31)+"1", "1519", "0A", 4102),
+	)
 	writeProcSocketOwner(t, procRoot, 41, 4101)
 
 	processIDs, err := readListenerPIDsFromProc(context.Background(), procRoot, "5401", 41)
 	if err != nil {
 		t.Fatalf("readListenerPIDsFromProc returned error: %v", err)
 	}
+
 	if len(processIDs) != 1 || processIDs[0] != 41 {
 		t.Fatalf("process IDs=%v, want [41]", processIDs)
 	}
@@ -30,15 +36,25 @@ func TestReadListenerPIDsFromProcMatchesConfiguredIPv4Loopback(t *testing.T) {
 func TestReadListenerPIDsFromProcMatchesConfiguredIPv6Loopback(t *testing.T) {
 	procRoot := t.TempDir()
 	writeProcTable(t, procRoot, "tcp", procTCPLine("0100007F", "1519", "0A", 4101))
-	writeProcTable(t, procRoot, "tcp6", procTCPLine("00000000000000000000000001000000", "1519", "0A", 4102))
+	writeProcTable(
+		t,
+		procRoot,
+		"tcp6",
+		procTCPLine("00000000000000000000000001000000", "1519", "0A", 4102),
+	)
 	writeProcSocketOwner(t, procRoot, 82, 4102)
 
 	processIDs, err := readListenerPIDsFromProcAddress(
-		context.Background(), procRoot, netip.MustParseAddr("::1"), "5401", 82,
+		context.Background(),
+		procRoot,
+		netip.MustParseAddr("::1"),
+		"5401",
+		82,
 	)
 	if err != nil {
 		t.Fatalf("readListenerPIDsFromProcAddress returned error: %v", err)
 	}
+
 	if len(processIDs) != 1 || processIDs[0] != 82 {
 		t.Fatalf("process IDs=%v, want [82]", processIDs)
 	}
@@ -56,6 +72,7 @@ func TestReadListenerPIDsFromProcIgnoresOtherIPv4Address(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readListenerPIDsFromProc returned error: %v", err)
 	}
+
 	if len(processIDs) != 1 || processIDs[0] != 82 {
 		t.Fatalf("process IDs=%v, want [82]", processIDs)
 	}
@@ -70,11 +87,16 @@ func TestReadListenerPIDsFromProcMatchesIPv4WildcardOnly(t *testing.T) {
 	writeProcSocketOwner(t, procRoot, 82, 4102)
 
 	processIDs, err := readListenerPIDsFromProcAddress(
-		context.Background(), procRoot, netip.MustParseAddr("0.0.0.0"), "5401", 41,
+		context.Background(),
+		procRoot,
+		netip.MustParseAddr("0.0.0.0"),
+		"5401",
+		41,
 	)
 	if err != nil {
 		t.Fatalf("readListenerPIDsFromProcAddress returned error: %v", err)
 	}
+
 	if len(processIDs) != 1 || processIDs[0] != 41 {
 		t.Fatalf("process IDs=%v, want [41]", processIDs)
 	}
@@ -90,6 +112,7 @@ func TestReadListenerPIDsFromProcFindsExpectedOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readListenerPIDsFromProc returned error: %v", err)
 	}
+
 	if len(processIDs) != 1 || processIDs[0] != 41 {
 		t.Fatalf("process IDs=%v, want [41]", processIDs)
 	}
@@ -105,6 +128,7 @@ func TestReadListenerPIDsFromProcFindsForeignOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readListenerPIDsFromProc returned error: %v", err)
 	}
+
 	if len(processIDs) != 1 || processIDs[0] != 82 {
 		t.Fatalf("process IDs=%v, want [82]", processIDs)
 	}
@@ -121,6 +145,7 @@ func TestReadListenerPIDsFromProcIgnoresOtherPortsAndStates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readListenerPIDsFromProc returned error: %v", err)
 	}
+
 	if len(processIDs) != 0 {
 		t.Fatalf("process IDs=%v, want none", processIDs)
 	}
@@ -156,9 +181,11 @@ func TestReadListenerPIDsFromProcReturnsPermissionFailure(t *testing.T) {
 	if err := os.MkdirAll(fdPath, 0o700); err != nil {
 		t.Fatalf("create fd directory: %v", err)
 	}
+
 	if err := os.Chmod(fdPath, 0); err != nil {
 		t.Fatalf("remove fd permissions: %v", err)
 	}
+
 	t.Cleanup(func() {
 		_ = os.Chmod(fdPath, 0o700)
 	})
@@ -178,9 +205,11 @@ func TestReadListenerPIDsFromProcIgnoresUnrelatedPermissionFailure(t *testing.T)
 	if err := os.MkdirAll(fdPath, 0o700); err != nil {
 		t.Fatalf("create unrelated fd directory: %v", err)
 	}
+
 	if err := os.Chmod(fdPath, 0); err != nil {
 		t.Fatalf("remove unrelated fd permissions: %v", err)
 	}
+
 	t.Cleanup(func() {
 		_ = os.Chmod(fdPath, 0o700)
 	})
@@ -189,6 +218,7 @@ func TestReadListenerPIDsFromProcIgnoresUnrelatedPermissionFailure(t *testing.T)
 	if err != nil {
 		t.Fatalf("readListenerPIDsFromProc returned error: %v", err)
 	}
+
 	if len(processIDs) != 1 || processIDs[0] != 41 {
 		t.Fatalf("process IDs=%v, want [41]", processIDs)
 	}
@@ -200,6 +230,7 @@ func writeProcTable(t *testing.T, procRoot string, name string, lines string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("create proc net: %v", err)
 	}
+
 	if err := os.WriteFile(path, []byte(procTCPHeader+lines), 0o600); err != nil {
 		t.Fatalf("write proc table: %v", err)
 	}
@@ -211,6 +242,7 @@ func writeProcSocketOwner(t *testing.T, procRoot string, processID int, inode ui
 	if err := os.MkdirAll(fdPath, 0o700); err != nil {
 		t.Fatalf("create fd directory: %v", err)
 	}
+
 	linkPath := filepath.Join(fdPath, fmt.Sprintf("%d", inode))
 	if err := os.Symlink(fmt.Sprintf("socket:[%d]", inode), linkPath); err != nil {
 		t.Fatalf("create socket symlink: %v", err)

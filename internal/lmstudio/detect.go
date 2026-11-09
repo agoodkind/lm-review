@@ -35,6 +35,7 @@ func Detect(ctx context.Context, token string) (*Backend, error) {
 	}
 
 	var detected *Backend
+
 	for _, c := range candidates {
 		models, err := ListModels(ctx, c.url, c.token)
 		if err == nil {
@@ -42,13 +43,25 @@ func Detect(ctx context.Context, token string) (*Backend, error) {
 			break
 		}
 	}
+
 	if detected != nil {
-		slog.Info("lmstudio.detect.completed", "backend", detected.Name, "url", detected.URL, "model_count", len(detected.Models))
+		slog.Info(
+			"lmstudio.detect.completed",
+			"backend",
+			detected.Name,
+			"url",
+			detected.URL,
+			"model_count",
+			len(detected.Models),
+		)
 		return detected, nil
 	}
 
 	slog.Warn("lmstudio.detect.failed")
-	return nil, fmt.Errorf("no LLM backend found at localhost:5400, localhost:1234, or localhost:11434")
+
+	return nil, fmt.Errorf(
+		"no LLM backend found at localhost:5400, localhost:1234, or localhost:11434",
+	)
 }
 
 // ListModels returns available model IDs from an OpenAI-compatible endpoint.
@@ -59,6 +72,7 @@ func ListModels(ctx context.Context, baseURL, token string) ([]string, error) {
 		slog.Warn("lmstudio.list_models.request_failed", "base_url", baseURL, "err", err)
 		return nil, err
 	}
+
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -69,12 +83,14 @@ func ListModels(ctx context.Context, baseURL, token string) ([]string, error) {
 		slog.Warn("lmstudio.list_models.http_failed", "base_url", baseURL, "err", err)
 		return nil, err
 	}
+
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		slog.Warn("lmstudio.list_models.unauthorized", "base_url", baseURL)
 		return nil, fmt.Errorf("authentication required - pass --token")
 	}
+
 	if resp.StatusCode != http.StatusOK {
 		slog.Warn("lmstudio.list_models.bad_status", "base_url", baseURL, "status", resp.StatusCode)
 		return nil, fmt.Errorf("status %d", resp.StatusCode)
@@ -96,7 +112,9 @@ func ListModels(ctx context.Context, baseURL, token string) ([]string, error) {
 			ids = append(ids, m.ID)
 		}
 	}
+
 	slog.Debug("lmstudio.list_models.completed", "base_url", baseURL, "model_count", len(ids))
+
 	return ids, nil
 }
 
@@ -117,6 +135,7 @@ func SelectModels(models []string) (fast, deep string) {
 	}
 
 	var candidates []scored
+
 	for _, id := range models {
 		lower := strings.ToLower(id)
 		if strings.Contains(lower, "embed") {
@@ -127,6 +146,7 @@ func SelectModels(models []string) (fast, deep string) {
 		if m := reParamCount.FindStringSubmatch(id); m != nil {
 			totalB, _ = strconv.ParseFloat(m[1], 64)
 		}
+
 		if m := reActiveParams.FindStringSubmatch(id); m != nil {
 			activeB, _ = strconv.ParseFloat(m[1], 64)
 		}
@@ -135,6 +155,7 @@ func SelectModels(models []string) (fast, deep string) {
 		if activeB > 0 {
 			effective = activeB
 		}
+
 		if effective == 0 {
 			effective = 1
 		}
@@ -144,13 +165,17 @@ func SelectModels(models []string) (fast, deep string) {
 			coderBonus = 1.0
 		}
 
-		candidates = append(candidates, scored{id: id, effectiveB: effective, totalB: totalB, coderBonus: coderBonus})
+		candidates = append(
+			candidates,
+			scored{id: id, effectiveB: effective, totalB: totalB, coderBonus: coderBonus},
+		)
 	}
 
 	if len(candidates) == 0 {
 		if len(models) > 0 {
 			return models[0], models[0]
 		}
+
 		return "", ""
 	}
 

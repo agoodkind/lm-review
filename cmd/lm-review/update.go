@@ -22,6 +22,7 @@ func newUpdateCmd() *cobra.Command {
 	cmd.AddCommand(newUpdateCheckCmd())
 	cmd.AddCommand(newUpdateApplyCmd())
 	cmd.AddCommand(newUpdateStatusCmd())
+
 	return cmd
 }
 
@@ -32,16 +33,20 @@ func newUpdateCheckCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 			log := lmReviewLog(ctx)
-			result, err := selfupdate.Check(ctx, updateopts.Options(updateopts.Overrides{
-				Client:      nil,
-				InstallPath: "",
-				DryRun:      false,
-				Log:         log,
-			}))
+			result, err := selfupdate.Check(
+				ctx,
+				updateopts.Options(updateopts.Overrides{
+					Client:      nil,
+					InstallPath: "",
+					DryRun:      false,
+					Log:         log,
+				}),
+			)
 			if err != nil {
 				log.ErrorContext(ctx, "lm-review.update.check_failed", "err", err)
 				return fmt.Errorf("update check: %w", err)
 			}
+
 			out := cmd.OutOrStdout()
 			fmt.Fprintln(out, "current version: "+result.CurrentVersion)
 			fmt.Fprintln(out, "latest tag:      "+result.LatestTag)
@@ -51,6 +56,7 @@ func newUpdateCheckCmd() *cobra.Command {
 			} else {
 				fmt.Fprintln(out, "update available: no")
 			}
+
 			return nil
 		},
 	}
@@ -64,16 +70,20 @@ func newUpdateApplyCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 			log := lmReviewLog(ctx)
-			result, err := selfupdate.Apply(ctx, updateopts.Options(updateopts.Overrides{
-				Client:      nil,
-				InstallPath: "",
-				DryRun:      dryRun,
-				Log:         log,
-			}))
+			result, err := selfupdate.Apply(
+				ctx,
+				updateopts.Options(updateopts.Overrides{
+					Client:      nil,
+					InstallPath: "",
+					DryRun:      dryRun,
+					Log:         log,
+				}),
+			)
 			if err != nil {
 				log.ErrorContext(ctx, "lm-review.update.apply_failed", "err", err)
 				return fmt.Errorf("update apply: %w", err)
 			}
+
 			out := cmd.OutOrStdout()
 			switch {
 			case !result.UpdateAvailable:
@@ -83,12 +93,17 @@ func newUpdateApplyCmd() *cobra.Command {
 			case !result.Applied:
 				fmt.Fprintln(out, "lm-review: update available but not applied")
 			default:
-				fmt.Fprintln(out, "lm-review: update applied; a running daemon uses the new binary after it next restarts")
+				fmt.Fprintln(
+					out,
+					"lm-review: update applied; a running daemon uses the new binary after it next restarts",
+				)
 			}
+
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "download and verify without installing")
+
 	return cmd
 }
 
@@ -107,9 +122,17 @@ func newUpdateStatusCmd() *cobra.Command {
 			})
 			state, err := selfupdate.LoadState(options.StatePath)
 			if err != nil {
-				log.ErrorContext(ctx, "lm-review.update.status_failed", "err", err, "path", options.StatePath)
+				log.ErrorContext(
+					ctx,
+					"lm-review.update.status_failed",
+					"err",
+					err,
+					"path",
+					options.StatePath,
+				)
 				return fmt.Errorf("update status: %w", err)
 			}
+
 			out := cmd.OutOrStdout()
 			fmt.Fprintln(out, "current version:   "+options.Config.CurrentVersion)
 			fmt.Fprintln(out, "current commit:    "+options.Config.CurrentCommit)
@@ -117,21 +140,27 @@ func newUpdateStatusCmd() *cobra.Command {
 			if !state.LastCheckAt.IsZero() {
 				fmt.Fprintln(out, "last check:        "+state.LastCheckAt.Format(time.RFC3339))
 			}
+
 			if !state.NextCheckAt.IsZero() {
 				fmt.Fprintln(out, "next check:        "+state.NextCheckAt.Format(time.RFC3339))
 			}
+
 			if state.LatestTag != "" {
 				fmt.Fprintln(out, "latest tag:        "+state.LatestTag)
 			}
+
 			if state.AppliedTag != "" {
 				fmt.Fprintln(out, "applied tag:       "+state.AppliedTag)
 			}
+
 			if state.LastResult != "" {
 				fmt.Fprintln(out, "last result:       "+state.LastResult)
 			}
+
 			if state.LastError != "" {
 				fmt.Fprintln(out, "last error:        "+state.LastError)
 			}
+
 			return nil
 		},
 	}

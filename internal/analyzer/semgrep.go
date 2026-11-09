@@ -42,6 +42,7 @@ func semgrepInstalled(ctx context.Context) bool {
 		slog.DebugContext(ctx, "semgrep.run.skipped", "reason", "binary not found")
 		return false
 	}
+
 	return true
 }
 
@@ -49,6 +50,7 @@ func (semgrepSource) Run(ctx context.Context, opts RunOptions) ([]Finding, error
 	if !semgrepInstalled(ctx) {
 		return nil, nil
 	}
+
 	configPath, ok := findSemgrepConfig(opts.RepoRoot)
 	if !ok {
 		return nil, nil
@@ -60,10 +62,19 @@ func (semgrepSource) Run(ctx context.Context, opts RunOptions) ([]Finding, error
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
-			slog.ErrorContext(ctx, "semgrep.run.failed", "err", err, "stderr", string(exitErr.Stderr))
+			slog.ErrorContext(
+				ctx,
+				"semgrep.run.failed",
+				"err",
+				err,
+				"stderr",
+				string(exitErr.Stderr),
+			)
 			return nil, fmt.Errorf("semgrep: %s", string(exitErr.Stderr))
 		}
+
 		slog.ErrorContext(ctx, "semgrep.run.failed", "err", err)
+
 		return nil, fmt.Errorf("semgrep: %w", err)
 	}
 
@@ -84,25 +95,32 @@ func (semgrepSource) Run(ctx context.Context, opts RunOptions) ([]Finding, error
 		if err != nil {
 			continue
 		}
+
 		rel = filepath.Clean(rel)
 		if len(allowedFiles) > 0 && !allowedFiles[rel] {
 			continue
 		}
+
 		if len(opts.EnabledChecks) > 0 && !slices.Contains(opts.EnabledChecks, item.CheckID) {
 			continue
 		}
-		findings = append(findings, Finding{
-			Tool:      "semgrep",
-			Check:     item.CheckID,
-			Severity:  semgrepSeverity(item.Extra.Severity),
-			File:      rel,
-			Line:      item.Start.Line,
-			EndLine:   item.End.Line,
-			Message:   item.Extra.Message,
-			Principle: "",
-			Fix:       "",
-		})
+
+		findings = append(
+			findings,
+			Finding{
+				Tool:      "semgrep",
+				Check:     item.CheckID,
+				Severity:  semgrepSeverity(item.Extra.Severity),
+				File:      rel,
+				Line:      item.Start.Line,
+				EndLine:   item.End.Line,
+				Message:   item.Extra.Message,
+				Principle: "",
+				Fix:       "",
+			},
+		)
 	}
+
 	return findings, nil
 }
 
@@ -117,6 +135,7 @@ func findSemgrepConfig(repoRoot string) (string, bool) {
 			return candidate, true
 		}
 	}
+
 	return "", false
 }
 

@@ -11,6 +11,7 @@ import (
 
 func TestInferenceWireContract(t *testing.T) {
 	requestFields := (&InferRequest{}).ProtoReflect().Descriptor().Fields()
+
 	wantRequestFields := map[string]int32{
 		"prompt":             1,
 		"input":              2,
@@ -30,14 +31,17 @@ func TestInferenceWireContract(t *testing.T) {
 	if got := int32(replyFields.ByName("output_json").Number()); got != 1 {
 		t.Fatalf("output_json field number=%d, want 1", got)
 	}
+
 	if got := int32(replyFields.ByName("status").Number()); got != 2 {
 		t.Fatalf("status field number=%d, want 2", got)
 	}
+
 	if got := int32(replyFields.ByName("metadata").Number()); got != 3 {
 		t.Fatalf("metadata field number=%d, want 3", got)
 	}
 
 	optionsFields := File_inference_proto.Messages().ByName("GenerationOptions").Fields()
+
 	wantOptionFields := map[string]int32{
 		"reasoning_effort":      1,
 		"max_completion_tokens": 2,
@@ -51,6 +55,7 @@ func TestInferenceWireContract(t *testing.T) {
 	}
 
 	metadataFields := File_inference_proto.Messages().ByName("InvocationMetadata").Fields()
+
 	wantMetadataFields := map[string]int32{
 		"request_id":           1,
 		"service_version":      2,
@@ -76,12 +81,14 @@ func TestInferenceWireContract(t *testing.T) {
 			t.Fatalf("metadata field %q number=%v, want %d", name, field, number)
 		}
 	}
+
 	for _, name := range []string{"prompt_tokens", "completion_tokens", "total_tokens"} {
 		field := metadataFields.ByName(protoreflect.Name(name))
 		if !field.HasPresence() {
 			t.Fatalf("metadata field %q does not preserve presence", name)
 		}
 	}
+
 	if Inference_Infer_FullMethodName != "/inference.v1.Inference/Infer" {
 		t.Fatalf("method name=%q", Inference_Infer_FullMethodName)
 	}
@@ -107,36 +114,42 @@ func TestInvocationTokenUsagePresenceOnWireAndJSON(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			wire, err := proto.Marshal(test.metadata)
-			if err != nil {
-				t.Fatalf("marshal wire: %v", err)
-			}
-			var decoded InvocationMetadata
-			if err := proto.Unmarshal(wire, &decoded); err != nil {
-				t.Fatalf("unmarshal wire: %v", err)
-			}
-			wirePresent := decoded.PromptTokens != nil &&
-				decoded.CompletionTokens != nil && decoded.TotalTokens != nil
-			if wirePresent != test.wantPresent {
-				t.Fatalf("wire presence=%v, want %v", wirePresent, test.wantPresent)
-			}
+		t.Run(
+			test.name,
+			func(t *testing.T) {
+				wire, err := proto.Marshal(test.metadata)
+				if err != nil {
+					t.Fatalf("marshal wire: %v", err)
+				}
 
-			encodedJSON, err := protojson.Marshal(test.metadata)
-			if err != nil {
-				t.Fatalf("marshal JSON: %v", err)
-			}
-			jsonPresent := strings.Contains(string(encodedJSON), `"promptTokens":"0"`) &&
-				strings.Contains(string(encodedJSON), `"completionTokens":"0"`) &&
-				strings.Contains(string(encodedJSON), `"totalTokens":"0"`)
-			if jsonPresent != test.wantPresent {
-				t.Fatalf(
-					"JSON presence=%v, want %v: %s",
-					jsonPresent,
-					test.wantPresent,
-					encodedJSON,
-				)
-			}
-		})
+				var decoded InvocationMetadata
+				if err := proto.Unmarshal(wire, &decoded); err != nil {
+					t.Fatalf("unmarshal wire: %v", err)
+				}
+
+				wirePresent := decoded.PromptTokens != nil &&
+					decoded.CompletionTokens != nil && decoded.TotalTokens != nil
+				if wirePresent != test.wantPresent {
+					t.Fatalf("wire presence=%v, want %v", wirePresent, test.wantPresent)
+				}
+
+				encodedJSON, err := protojson.Marshal(test.metadata)
+				if err != nil {
+					t.Fatalf("marshal JSON: %v", err)
+				}
+
+				jsonPresent := strings.Contains(string(encodedJSON), `"promptTokens":"0"`) &&
+					strings.Contains(string(encodedJSON), `"completionTokens":"0"`) &&
+					strings.Contains(string(encodedJSON), `"totalTokens":"0"`)
+				if jsonPresent != test.wantPresent {
+					t.Fatalf(
+						"JSON presence=%v, want %v: %s",
+						jsonPresent,
+						test.wantPresent,
+						encodedJSON,
+					)
+				}
+			},
+		)
 	}
 }

@@ -15,7 +15,13 @@ import (
 func TestCheckPreflightAllowsFreeListener(t *testing.T) {
 	dependencies := testDependencies([]int{}, nil, nil)
 	dependencies.ProbeBind = func(context.Context, string) error { return nil }
-	if err := Check(context.Background(), PhasePreflight, "[::1]:5401", 0, dependencies); err != nil {
+	if err := Check(
+		context.Background(),
+		PhasePreflight,
+		"[::1]:5401",
+		0,
+		dependencies,
+	); err != nil {
 		t.Fatalf("Check returned error: %v", err)
 	}
 }
@@ -35,7 +41,13 @@ func TestCheckPreflightAllowsUnrelatedCoexistingListener(t *testing.T) {
 		t.Fatal("ownership lookup ran after successful exact bind probe")
 		return nil, nil
 	}
-	if err := Check(context.Background(), PhasePreflight, "127.0.0.1:5401", 41, dependencies); err != nil {
+	if err := Check(
+		context.Background(),
+		PhasePreflight,
+		"127.0.0.1:5401",
+		41,
+		dependencies,
+	); err != nil {
 		t.Fatalf("Check returned error: %v", err)
 	}
 }
@@ -50,7 +62,13 @@ func TestCheckPreflightRejectsForeignListener(t *testing.T) {
 
 func TestCheckPreflightAllowsExpectedServiceListener(t *testing.T) {
 	dependencies := testDependencies([]int{41}, nil, nil)
-	if err := Check(context.Background(), PhasePreflight, "[::1]:5401", 41, dependencies); err != nil {
+	if err := Check(
+		context.Background(),
+		PhasePreflight,
+		"[::1]:5401",
+		41,
+		dependencies,
+	); err != nil {
 		t.Fatalf("Check returned error: %v", err)
 	}
 }
@@ -74,7 +92,13 @@ func TestCheckPostRestartReturnsHealthFailure(t *testing.T) {
 
 func TestCheckPostRestartAcceptsOwnedHealthyListener(t *testing.T) {
 	dependencies := testDependencies([]int{41}, nil, nil)
-	if err := Check(context.Background(), PhasePostRestart, "[::1]:5401", 41, dependencies); err != nil {
+	if err := Check(
+		context.Background(),
+		PhasePostRestart,
+		"[::1]:5401",
+		41,
+		dependencies,
+	); err != nil {
 		t.Fatalf("Check returned error: %v", err)
 	}
 }
@@ -84,6 +108,7 @@ func TestReadPIDLinesDeduplicatesAndSorts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readPIDLines returned error: %v", err)
 	}
+
 	if len(processIDs) != 2 || processIDs[0] != 41 || processIDs[1] != 82 {
 		t.Fatalf("process IDs=%v, want [41 82]", processIDs)
 	}
@@ -100,13 +125,16 @@ func TestReadListenerPIDsFromLsofMatchesIPv6Wildcard(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("lsof listener ownership is Darwin-specific")
 	}
+
 	if _, err := exec.LookPath("lsof"); err != nil {
 		t.Skip("lsof is not available")
 	}
+
 	listener, err := net.Listen("tcp6", "[::]:0")
 	if err != nil {
 		t.Skipf("IPv6 wildcard listener is unavailable: %v", err)
 	}
+
 	t.Cleanup(func() {
 		if closeErr := listener.Close(); closeErr != nil {
 			t.Errorf("close listener: %v", closeErr)
@@ -116,6 +144,7 @@ func TestReadListenerPIDsFromLsofMatchesIPv6Wildcard(t *testing.T) {
 	if !ok {
 		t.Fatalf("listener address type=%T, want *net.TCPAddr", listener.Addr())
 	}
+
 	processIDs, err := readListenerPIDsFromLsof(
 		context.Background(),
 		"::",
@@ -124,6 +153,7 @@ func TestReadListenerPIDsFromLsofMatchesIPv6Wildcard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readListenerPIDsFromLsof returned error: %v", err)
 	}
+
 	if len(processIDs) != 1 || processIDs[0] != os.Getpid() {
 		t.Fatalf("process IDs=%v, want [%d]", processIDs, os.Getpid())
 	}

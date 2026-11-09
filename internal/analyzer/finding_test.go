@@ -16,6 +16,7 @@ func TestDedupeAndSort(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("len(got)=%d, want 2", len(got))
 	}
+
 	if got[0].File != "a.go" || got[1].File != "b.go" {
 		t.Fatalf("unexpected sort order: %#v", got)
 	}
@@ -24,11 +25,25 @@ func TestDedupeAndSort(t *testing.T) {
 func TestFormatForPrompt(t *testing.T) {
 	findings := []Finding{
 		{Tool: "vet", Check: "printf", File: "a.go", Line: 10, Message: "bad printf"},
-		{Tool: "custom", Check: "slog_error_without_err", File: "b.go", Line: 12, Message: "missing err", Fix: "add err"},
+		{
+			Tool:    "custom",
+			Check:   "slog_error_without_err",
+			File:    "b.go",
+			Line:    12,
+			Message: "missing err",
+			Fix:     "add err",
+		},
 	}
 
 	got := FormatForPrompt(findings)
-	for _, want := range []string{"## Static analyzer findings", "### vet", "### custom", "a.go:10 [printf]", "fix: add err"} {
+
+	for _, want := range []string{
+		"## Static analyzer findings",
+		"### vet",
+		"### custom",
+		"a.go:10 [printf]",
+		"fix: add err",
+	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, got)
 		}

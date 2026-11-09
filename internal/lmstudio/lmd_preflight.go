@@ -31,18 +31,34 @@ type LMDLoadResponse struct {
 }
 
 // PreflightLoad posts a load or estimate request to the LMD load API.
-func PreflightLoad(ctx context.Context, baseURL string, token string, request LMDLoadRequest) (*LMDLoadResponse, error) {
+func PreflightLoad(
+	ctx context.Context,
+	baseURL string,
+	token string,
+	request LMDLoadRequest,
+) (*LMDLoadResponse, error) {
 	body, err := json.Marshal(request)
 	if err != nil {
 		gklog.LoggerFromContext(ctx).ErrorContext(ctx, "lmd.preflight.marshal_failed", "err", err)
 		return nil, errors.New("marshal LMD load request failed: " + err.Error())
 	}
 
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(baseURL, "/")+"/api/v1/models/load", bytes.NewReader(body))
+	httpRequest, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		strings.TrimRight(baseURL, "/")+"/api/v1/models/load",
+		bytes.NewReader(body),
+	)
 	if err != nil {
-		gklog.LoggerFromContext(ctx).ErrorContext(ctx, "lmd.preflight.request_build_failed", "err", err)
+		gklog.LoggerFromContext(ctx).ErrorContext(
+			ctx,
+			"lmd.preflight.request_build_failed",
+			"err",
+			err,
+		)
 		return nil, errors.New("build LMD load request failed: " + err.Error())
 	}
+
 	httpRequest.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		httpRequest.Header.Set("Authorization", "Bearer "+token)
@@ -53,10 +69,16 @@ func PreflightLoad(ctx context.Context, baseURL string, token string, request LM
 		gklog.LoggerFromContext(ctx).ErrorContext(ctx, "lmd.preflight.send_failed", "err", err)
 		return nil, errors.New("send LMD load request failed: " + err.Error())
 	}
+
 	defer func() { _ = response.Body.Close() }()
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		gklog.LoggerFromContext(ctx).ErrorContext(ctx, "lmd.preflight.bad_status", "status_code", response.StatusCode)
+		gklog.LoggerFromContext(ctx).ErrorContext(
+			ctx,
+			"lmd.preflight.bad_status",
+			"status_code",
+			response.StatusCode,
+		)
 		return nil, fmt.Errorf("LMD load API returned %d", response.StatusCode)
 	}
 
@@ -65,5 +87,6 @@ func PreflightLoad(ctx context.Context, baseURL string, token string, request LM
 		gklog.LoggerFromContext(ctx).ErrorContext(ctx, "lmd.preflight.decode_failed", "err", err)
 		return nil, errors.New("decode LMD load response failed: " + err.Error())
 	}
+
 	return &decoded, nil
 }

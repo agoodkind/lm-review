@@ -18,13 +18,18 @@ func Root(dir string) (string, error) {
 	if dir != "" {
 		args = append([]string{"-C", dir}, args...)
 	}
+
 	out, err := exec.Command("git", args...).Output()
 	if err != nil {
 		slog.Warn("gitutil.root.failed", "dir", dir, "err", err)
-		return "", fmt.Errorf("not in a git repo and no path provided. Pass path='/path/to/repo' to specify one")
+		return "", fmt.Errorf(
+			"not in a git repo and no path provided. Pass path='/path/to/repo' to specify one",
+		)
 	}
+
 	root := strings.TrimSpace(string(out))
 	slog.Debug("gitutil.root.completed", "dir", dir, "root", root)
+
 	return root, nil
 }
 
@@ -36,18 +41,31 @@ func StagedDiff(repoRoot string) (string, error) {
 		slog.Warn("gitutil.staged_diff.failed", "repo_root", repoRoot, "err", err)
 		return "", fmt.Errorf("git diff --cached: %w", err)
 	}
+
 	diff := string(out)
 	slog.Debug("gitutil.staged_diff.completed", "repo_root", repoRoot, "bytes", len(diff))
+
 	return diff, nil
 }
 
 // PRDiff returns the diff between the current branch and the requested base.
 func PRDiff(repoRoot string, baseRef string) (string, error) {
 	slog.Debug("gitutil.pr_diff.begin", "repo_root", repoRoot, "base_ref", baseRef)
-	fetchOutput, err := exec.Command("git", "-C", repoRoot, "fetch", "--all", "--prune").CombinedOutput()
+	fetchOutput, err := exec.Command(
+		"git",
+		"-C",
+		repoRoot,
+		"fetch",
+		"--all",
+		"--prune",
+	).CombinedOutput()
 	if err != nil {
 		slog.Warn("gitutil.pr_diff.fetch_failed", "repo_root", repoRoot, "err", err)
-		return "", fmt.Errorf("git fetch --all --prune: %w: %s", err, strings.TrimSpace(string(fetchOutput)))
+		return "", fmt.Errorf(
+			"git fetch --all --prune: %w: %s",
+			err,
+			strings.TrimSpace(string(fetchOutput)),
+		)
 	}
 
 	base := strings.TrimSpace(baseRef)
@@ -64,8 +82,18 @@ func PRDiff(repoRoot string, baseRef string) (string, error) {
 		slog.Warn("gitutil.pr_diff.failed", "repo_root", repoRoot, "base_ref", base, "err", err)
 		return "", fmt.Errorf("git diff %s...HEAD: %w", base, err)
 	}
+
 	diff := string(out)
-	slog.Debug("gitutil.pr_diff.completed", "repo_root", repoRoot, "base_ref", base, "bytes", len(diff))
+	slog.Debug(
+		"gitutil.pr_diff.completed",
+		"repo_root",
+		repoRoot,
+		"base_ref",
+		base,
+		"bytes",
+		len(diff),
+	)
+
 	return diff, nil
 }
 
@@ -90,16 +118,19 @@ func WorktreeDiff(repoRoot string) (string, error) {
 		slog.Warn("gitutil.worktree_diff.untracked_failed", "repo_root", repoRoot, "err", err)
 		return "", err
 	}
+
 	for _, file := range untrackedFiles {
 		content, readErr := os.ReadFile(filepath.Join(repoRoot, file))
 		if readErr != nil {
 			return "", fmt.Errorf("read untracked file %s: %w", file, readErr)
 		}
+
 		sb.WriteString(syntheticNewFileDiff(file, content))
 	}
 
 	worktreeDiff := sb.String()
 	slog.Debug("gitutil.worktree_diff.completed", "repo_root", repoRoot, "bytes", len(worktreeDiff))
+
 	return worktreeDiff, nil
 }
 
@@ -112,6 +143,7 @@ func RepoSnapshot(repoRoot string, maxBytes int) (string, error) {
 		slog.Warn("gitutil.repo_snapshot.failed", "repo_root", repoRoot, "err", err)
 		return "", err
 	}
+
 	untrackedFiles, err := gitGoFiles(repoRoot, "--others", "--exclude-standard")
 	if err != nil {
 		slog.Warn("gitutil.repo_snapshot.untracked_failed", "repo_root", repoRoot, "err", err)
@@ -125,23 +157,36 @@ func RepoSnapshot(repoRoot string, maxBytes int) (string, error) {
 		if f == "" {
 			continue
 		}
+
 		content, readErr := os.ReadFile(filepath.Join(repoRoot, f))
 		if readErr != nil {
 			if !os.IsNotExist(readErr) {
 				return "", fmt.Errorf("read repo file %s: %w", f, readErr)
 			}
+
 			continue
 		}
+
 		entry := fmt.Sprintf("// FILE: %s\n%s\n\n", f, content)
 		if maxBytes > 0 && sb.Len()+len(entry) > maxBytes {
 			fmt.Fprintf(&sb, "// ... truncated at %d bytes\n", maxBytes)
 			break
 		}
+
 		sb.WriteString(entry)
 	}
 
 	snapshot := sb.String()
-	slog.Debug("gitutil.repo_snapshot.completed", "repo_root", repoRoot, "bytes", len(snapshot), "file_count", len(files))
+	slog.Debug(
+		"gitutil.repo_snapshot.completed",
+		"repo_root",
+		repoRoot,
+		"bytes",
+		len(snapshot),
+		"file_count",
+		len(files),
+	)
+
 	return snapshot, nil
 }
 
@@ -149,12 +194,21 @@ func RepoSnapshot(repoRoot string, maxBytes int) (string, error) {
 // repo, using git object content when possible and the working tree as a
 // fallback for uncommitted files.
 func FilesSnapshot(repoRoot string, files []string, maxBytes int) (string, error) {
-	slog.Debug("gitutil.files_snapshot.begin", "repo_root", repoRoot, "file_count", len(files), "max_bytes", maxBytes)
+	slog.Debug(
+		"gitutil.files_snapshot.begin",
+		"repo_root",
+		repoRoot,
+		"file_count",
+		len(files),
+		"max_bytes",
+		maxBytes,
+	)
 	var sb strings.Builder
 
 	for _, file := range files {
 		file = filepath.Clean(file)
-		if file == "" || file == "." || strings.HasPrefix(file, "..") || !strings.HasSuffix(file, ".go") {
+		if file == "" || file == "." || strings.HasPrefix(file, "..") ||
+			!strings.HasSuffix(file, ".go") {
 			continue
 		}
 
@@ -174,31 +228,45 @@ func FilesSnapshot(repoRoot string, files []string, maxBytes int) (string, error
 			fmt.Fprintf(&sb, "// ... truncated at %d bytes\n", maxBytes)
 			break
 		}
+
 		sb.WriteString(entry)
 	}
 
 	snapshot := sb.String()
 	slog.Debug("gitutil.files_snapshot.completed", "repo_root", repoRoot, "bytes", len(snapshot))
+
 	return snapshot, nil
 }
 
 func defaultPRBase(repoRoot string) (string, error) {
 	slog.Debug("gitutil.default_pr_base.begin", "repo_root", repoRoot)
+
 	for _, ref := range []string{"@{upstream}", "origin/main", "origin/master"} {
 		if gitRefExists(repoRoot, ref) {
 			slog.Debug("gitutil.default_pr_base.completed", "repo_root", repoRoot, "base_ref", ref)
 			return ref, nil
 		}
 	}
+
 	slog.Warn("gitutil.default_pr_base.failed", "repo_root", repoRoot)
+
 	return "", fmt.Errorf("no PR base ref found; tried @{upstream}, origin/main, origin/master")
 }
 
 func gitRefExists(repoRoot string, ref string) bool {
 	slog.Debug("gitutil.ref_exists.begin", "repo_root", repoRoot, "ref", ref)
-	err := exec.Command("git", "-C", repoRoot, "rev-parse", "--verify", "--quiet", ref+"^{commit}").Run()
+	err := exec.Command(
+		"git",
+		"-C",
+		repoRoot,
+		"rev-parse",
+		"--verify",
+		"--quiet",
+		ref+"^{commit}",
+	).Run()
 	exists := err == nil
 	slog.Debug("gitutil.ref_exists.completed", "repo_root", repoRoot, "ref", ref, "exists", exists)
+
 	return exists
 }
 
@@ -213,35 +281,43 @@ func gitGoFiles(repoRoot string, args ...string) ([]string, error) {
 		slog.Warn("gitutil.go_files.failed", "repo_root", repoRoot, "err", err)
 		return nil, fmt.Errorf("git ls-files: %w", err)
 	}
+
 	files := splitNullOutput(out)
 	slog.Debug("gitutil.go_files.completed", "repo_root", repoRoot, "file_count", len(files))
+
 	return files, nil
 }
 
 func splitNullOutput(out []byte) []string {
 	parts := strings.Split(string(out), "\x00")
+
 	files := make([]string, 0, len(parts))
 	for _, part := range parts {
 		if part == "" {
 			continue
 		}
+
 		files = append(files, part)
 	}
+
 	return files
 }
 
 func appendUniqueFiles(fileLists ...[]string) []string {
 	seen := make(map[string]struct{})
 	var files []string
+
 	for _, fileList := range fileLists {
 		for _, file := range fileList {
 			if _, ok := seen[file]; ok {
 				continue
 			}
+
 			seen[file] = struct{}{}
 			files = append(files, file)
 		}
 	}
+
 	return files
 }
 
@@ -265,11 +341,13 @@ func syntheticNewFileDiff(file string, content []byte) string {
 		if line == "" {
 			continue
 		}
+
 		sb.WriteString("+")
 		sb.WriteString(line)
 		if !strings.HasSuffix(line, "\n") {
 			sb.WriteString("\n\\ No newline at end of file\n")
 		}
 	}
+
 	return sb.String()
 }

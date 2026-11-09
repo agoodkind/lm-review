@@ -102,7 +102,9 @@ type Result struct {
 // Qwen3 and DeepSeek use <think>...</think>, Phi-4 Reasoning uses
 // <|thinking|>...<|/thinking|>, others use <thinking>...</thinking>
 // or <reasoning>...</reasoning>.
-var reThinkBlock = regexp.MustCompile(`(?s)<(?:think|thinking|reasoning|\|thinking\|)>.*?</(?:think|thinking|reasoning|\|thinking\|)>`)
+var reThinkBlock = regexp.MustCompile(
+	`(?s)<(?:think|thinking|reasoning|\|thinking\|)>.*?</(?:think|thinking|reasoning|\|thinking\|)>`,
+)
 
 // reUnclosedThink strips a trailing unclosed think block when a
 // reasoning model runs out of tokens mid-thought. Only applied if no
@@ -124,10 +126,12 @@ func Parse(raw string) (*Result, error) {
 	// Strip markdown code fences.
 	if strings.HasPrefix(raw, "```") {
 		lines := strings.Split(raw, "\n")
+
 		end := len(lines) - 1
 		for end > 0 && strings.TrimSpace(lines[end]) == "```" {
 			end--
 		}
+
 		if len(lines) > 1 {
 			start := 1 // skip opening fence line
 			raw = strings.Join(lines[start:end+1], "\n")
@@ -143,6 +147,7 @@ func Parse(raw string) (*Result, error) {
 		if match == "" {
 			return nil, fmt.Errorf("no JSON found in LLM response: %s", truncate(raw, 200))
 		}
+
 		if err2 := json.Unmarshal([]byte(match), &result); err2 != nil {
 			return nil, fmt.Errorf("parse LLM JSON: %w\nraw: %s", err2, truncate(raw, 200))
 		}
@@ -192,9 +197,11 @@ func (r *Result) ExitCode(errorThreshold ...int) int {
 	if len(errorThreshold) > 0 && errorThreshold[0] > 0 {
 		threshold = errorThreshold[0]
 	}
+
 	if r.Stats.Errors >= threshold || r.Verdict == VerdictBlock {
 		return 1
 	}
+
 	return 0
 }
 
@@ -217,6 +224,7 @@ func verdictAnsiColor(v Verdict) string {
 	case VerdictSkip:
 		return ""
 	}
+
 	return ""
 }
 
@@ -232,6 +240,7 @@ func verdictIcon(v Verdict) string {
 	case VerdictSkip:
 		return "⏭️"
 	}
+
 	return ""
 }
 
@@ -245,6 +254,7 @@ func severityAnsiColor(severity string) string {
 	case "info":
 		return "\033[36m"
 	}
+
 	return ""
 }
 
@@ -258,6 +268,7 @@ func severityIcon(severity string) string {
 	case "info":
 		return "·"
 	}
+
 	return ""
 }
 
@@ -266,6 +277,7 @@ func formatLineRef(line, endLine int) string {
 	if endLine > line {
 		return fmt.Sprintf("%d-%d", line, endLine)
 	}
+
 	return strconv.Itoa(line)
 }
 
@@ -274,12 +286,15 @@ func formatLineRef(line, endLine int) string {
 func (r *Result) groupByFile() (map[string][]Issue, []string) {
 	byFile := make(map[string][]Issue)
 	order := []string{}
+
 	for _, issue := range r.Issues {
 		if _, seen := byFile[issue.File]; !seen {
 			order = append(order, issue.File)
 		}
+
 		byFile[issue.File] = append(byFile[issue.File], issue)
 	}
+
 	return byFile, order
 }
 
@@ -288,19 +303,31 @@ func (r *Result) writeTextIssues(b *strings.Builder) {
 	if len(r.Issues) == 0 {
 		return
 	}
+
 	byFile, order := r.groupByFile()
 	b.WriteString("\n")
+
 	for _, file := range order {
 		fmt.Fprintf(b, "  %s%s%s\n", ansiBold, file, ansiReset)
+
 		for _, issue := range byFile[file] {
-			fmt.Fprintf(b, "    %s%s%s %s[%s:%s]%s %s\n",
-				severityAnsiColor(issue.Severity), severityIcon(issue.Severity), ansiReset,
-				ansiDim, issue.Rule, formatLineRef(issue.Line, issue.EndLine), ansiReset,
-				issue.Message)
+			fmt.Fprintf(
+				b,
+				"    %s%s%s %s[%s:%s]%s %s\n",
+				severityAnsiColor(issue.Severity),
+				severityIcon(issue.Severity),
+				ansiReset,
+				ansiDim,
+				issue.Rule,
+				formatLineRef(issue.Line, issue.EndLine),
+				ansiReset,
+				issue.Message,
+			)
 			if issue.Suggestion != "" {
 				fmt.Fprintf(b, "      %s-> %s%s\n", ansiDim, issue.Suggestion, ansiReset)
 			}
 		}
+
 		b.WriteString("\n")
 	}
 }
@@ -309,23 +336,39 @@ func (r *Result) writeTextIssues(b *strings.Builder) {
 func (r *Result) Text() string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "\n%s%s lm-review [%s] %s%s %s%s\n",
-		ansiBold, verdictAnsiColor(r.Verdict), r.Model,
-		verdictIcon(r.Verdict), strings.ToUpper(string(r.Verdict)),
-		r.Summary, ansiReset)
+	fmt.Fprintf(
+		&b,
+		"\n%s%s lm-review [%s] %s%s %s%s\n",
+		ansiBold,
+		verdictAnsiColor(r.Verdict),
+		r.Model,
+		verdictIcon(r.Verdict),
+		strings.ToUpper(string(r.Verdict)),
+		r.Summary,
+		ansiReset,
+	)
 
 	if r.Stats.Errors+r.Stats.Warnings+r.Stats.Infos > 0 {
-		fmt.Fprintf(&b, "%s  %d errors · %d warnings · %d infos%s\n",
-			ansiDim, r.Stats.Errors, r.Stats.Warnings, r.Stats.Infos, ansiReset)
+		fmt.Fprintf(
+			&b,
+			"%s  %d errors · %d warnings · %d infos%s\n",
+			ansiDim,
+			r.Stats.Errors,
+			r.Stats.Warnings,
+			r.Stats.Infos,
+			ansiReset,
+		)
 	}
 
 	r.writeTextIssues(&b)
 
 	if len(r.Highlights) > 0 {
 		fmt.Fprintf(&b, "  %s👍 Highlights%s\n", ansiBold, ansiReset)
+
 		for _, h := range r.Highlights {
 			fmt.Fprintf(&b, "  %s· %s%s\n", ansiDim, h, ansiReset)
 		}
+
 		b.WriteString("\n")
 	}
 
@@ -346,6 +389,7 @@ func scopeLabelFor(scope string) string {
 	case "repo":
 		return "Repo Health"
 	}
+
 	return "Review"
 }
 
@@ -359,15 +403,19 @@ func markdownSeverityLabel(severity string) string {
 	case "info":
 		return "ℹ️ info"
 	}
+
 	return severity
 }
 
 // sortIssuesBySeverity sorts issues in-place: error > warning > info.
 func sortIssuesBySeverity(issues []Issue) {
 	sevOrd := map[string]int{"error": 0, "warning": 1, "info": 2}
-	sort.Slice(issues, func(i, j int) bool {
-		return sevOrd[issues[i].Severity] < sevOrd[issues[j].Severity]
-	})
+	sort.Slice(
+		issues,
+		func(i, j int) bool {
+			return sevOrd[issues[i].Severity] < sevOrd[issues[j].Severity]
+		},
+	)
 }
 
 // writeMarkdownFile writes the per-file <details> block for Markdown.
@@ -376,19 +424,28 @@ func writeMarkdownFile(b *strings.Builder, file string, issues []Issue) {
 	if len(issues) != 1 {
 		b.WriteString("s")
 	}
+
 	b.WriteString(")</summary>\n\n")
 	b.WriteString("| Severity | Line | Rule | Message | Suggestion |\n")
 	b.WriteString("|----------|------|------|---------|------------|\n")
+
 	for _, issue := range issues {
 		suggestion := issue.Suggestion
 		if suggestion == "" {
 			suggestion = "-"
 		}
-		fmt.Fprintf(b, "| %s | %s | `%s` | %s | %s |\n",
+
+		fmt.Fprintf(
+			b,
+			"| %s | %s | `%s` | %s | %s |\n",
 			markdownSeverityLabel(issue.Severity),
 			formatLineRef(issue.Line, issue.EndLine),
-			issue.Rule, issue.Message, suggestion)
+			issue.Rule,
+			issue.Message,
+			suggestion,
+		)
 	}
+
 	b.WriteString("\n</details>\n\n")
 }
 
@@ -397,11 +454,14 @@ func (r *Result) writeMarkdownIssues(b *strings.Builder) {
 	if len(r.Issues) == 0 {
 		return
 	}
+
 	byFile, order := r.groupByFile()
 	for _, issues := range byFile {
 		sortIssuesBySeverity(issues)
 	}
+
 	fmt.Fprintf(b, "### Issues\n\n")
+
 	for _, file := range order {
 		writeMarkdownFile(b, file, byFile[file])
 	}
@@ -415,22 +475,35 @@ func (r *Result) Markdown() string {
 	if r.LatencyMs > 0 {
 		model = fmt.Sprintf("%s, %dms", r.Model, r.LatencyMs)
 	}
+
 	fmt.Fprintf(&b, "## 🤖 %s (%s)\n\n", scopeLabelFor(r.Scope), model)
-	fmt.Fprintf(&b, "**Verdict:** %s %s. %s\n\n",
-		verdictIcon(r.Verdict), strings.ToUpper(string(r.Verdict)), r.Summary)
+	fmt.Fprintf(
+		&b,
+		"**Verdict:** %s %s. %s\n\n",
+		verdictIcon(r.Verdict),
+		strings.ToUpper(string(r.Verdict)),
+		r.Summary,
+	)
 
 	if r.Stats.Errors+r.Stats.Warnings+r.Stats.Infos > 0 {
-		fmt.Fprintf(&b, "> %d errors · %d warnings · %d infos\n\n",
-			r.Stats.Errors, r.Stats.Warnings, r.Stats.Infos)
+		fmt.Fprintf(
+			&b,
+			"> %d errors · %d warnings · %d infos\n\n",
+			r.Stats.Errors,
+			r.Stats.Warnings,
+			r.Stats.Infos,
+		)
 	}
 
 	r.writeMarkdownIssues(&b)
 
 	if len(r.Highlights) > 0 {
 		b.WriteString("### 👍 Highlights\n\n")
+
 		for _, h := range r.Highlights {
 			fmt.Fprintf(&b, "- %s\n", h)
 		}
+
 		b.WriteString("\n")
 	}
 
@@ -439,6 +512,7 @@ func (r *Result) Markdown() string {
 	}
 
 	fmt.Fprintf(&b, "\n<!-- lm-review:%s -->\n", r.Scope)
+
 	return b.String()
 }
 
@@ -516,6 +590,7 @@ func issueToSarifResult(issue Issue) sarifResult {
 	if issue.EndLine > issue.Line {
 		region.EndLine = issue.EndLine
 	}
+
 	location := sarifLocation{
 		ArtifactLocation: sarifArtifactLocation{URI: issue.File},
 		Region:           region,
@@ -524,6 +599,7 @@ func issueToSarifResult(issue Issue) sarifResult {
 	if issue.Suggestion != "" {
 		text += " Suggestion: " + issue.Suggestion
 	}
+
 	return sarifResult{
 		RuleID:    issue.Rule,
 		Level:     sarifLevelFor(issue.Severity),
@@ -543,19 +619,24 @@ func (r *Result) SARIF() (string, error) {
 	doc := sarifDoc{
 		Version: "2.1.0",
 		Schema:  "https://json.schemastore.org/sarif-2.1.0.json",
-		Runs: []sarifRun{{
-			Tool: sarifTool{Driver: sarifDriver{
-				Name:    "lm-review",
-				Version: "1.0.0",
-			}},
-			Results: results,
-		}},
+		Runs: []sarifRun{
+			{
+				Tool: sarifTool{
+					Driver: sarifDriver{
+						Name:    "lm-review",
+						Version: "1.0.0",
+					},
+				},
+				Results: results,
+			},
+		},
 	}
 
 	out, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("marshal SARIF: %w", err)
 	}
+
 	return string(out), nil
 }
 
@@ -564,18 +645,25 @@ func (r *Result) SARIF() (string, error) {
 func (r *Result) IssuesByCategory() map[Category][]Issue {
 	out := make(map[Category][]Issue)
 	sevOrd := map[string]int{"error": 0, "warning": 1, "info": 2}
+
 	for _, issue := range r.Issues {
 		cat := issue.Category
 		if cat == "" {
 			cat = "uncategorized"
 		}
+
 		out[cat] = append(out[cat], issue)
 	}
+
 	for cat := range out {
-		sort.Slice(out[cat], func(i, j int) bool {
-			return sevOrd[out[cat][i].Severity] < sevOrd[out[cat][j].Severity]
-		})
+		sort.Slice(
+			out[cat],
+			func(i, j int) bool {
+				return sevOrd[out[cat][i].Severity] < sevOrd[out[cat][j].Severity]
+			},
+		)
 	}
+
 	return out
 }
 
@@ -589,26 +677,32 @@ func extractFirstJSONObject(s string) string {
 		if s[i] != '{' {
 			continue
 		}
+
 		depth := 0
 		inString := false
 		escape := false
+
 		for j := i; j < len(s); j++ {
 			ch := s[j]
 			if escape {
 				escape = false
 				continue
 			}
+
 			if ch == '\\' && inString {
 				escape = true
 				continue
 			}
+
 			if ch == '"' {
 				inString = !inString
 				continue
 			}
+
 			if inString {
 				continue
 			}
+
 			switch ch {
 			case '{':
 				depth++
@@ -620,6 +714,7 @@ func extractFirstJSONObject(s string) string {
 			}
 		}
 	}
+
 	return ""
 }
 
@@ -644,5 +739,6 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
+
 	return s[:n] + "..."
 }

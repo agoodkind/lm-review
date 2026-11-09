@@ -28,12 +28,19 @@ func Serve(ctx context.Context) error {
 	addGettingStartedResource(s)
 	addGettingStartedPrompt(s)
 
-	modelFlag := mcp.WithString("model",
-		mcp.Description("Override the model for this request (e.g. 'qwen/qwen3-coder-next'). Uses config default if omitted."),
+	modelFlag := mcp.WithString(
+		"model",
+		mcp.Description(
+			"Override the model for this request (e.g. 'qwen/qwen3-coder-next'). Uses config default if omitted.",
+		),
 	)
 
-	depthFlag := mcp.WithString("depth",
-		mcp.Description("Review depth: quick (security+correctness only), normal (default), deep (larger model), ultra (two-pass verification with largest model)."),
+	depthFlag := mcp.WithString(
+		"depth",
+		mcp.Description(
+			"Review depth: quick (security+correctness only), normal (default), "+
+				"deep (larger model), ultra (two-pass verification with largest model).",
+		),
 	)
 
 	addReviewTool(s, depthFlag, modelFlag)
@@ -42,8 +49,10 @@ func Serve(ctx context.Context) error {
 	if err := server.ServeStdio(s); err != nil {
 		log := gklog.LoggerFromContext(ctx)
 		log.ErrorContext(ctx, "mcp.stdio.failed", "err", err)
+
 		return fmt.Errorf("serve MCP stdio: %w", err)
 	}
+
 	return nil
 }
 
@@ -108,7 +117,8 @@ func addGettingStartedPrompt(s *server.MCPServer) {
 				Messages: []mcp.PromptMessage{
 					{
 						Role: mcp.RoleUser,
-						Content: mcp.NewTextContent(`You have access to lm-review, a local LLM code review tool powered by LM Studio.
+						Content: mcp.NewTextContent(
+							`You have access to lm-review, a local LLM code review tool powered by LM Studio.
 
 Available tools:
 - review: Path-based review launcher. Defaults to auto mode: staged diff, worktree diff, PR diff, then repo snapshot.
@@ -120,7 +130,8 @@ Each tool accepts:
 - model (string): Override the model for this request.
 - path (string): Path to git repo root. Auto-detected if omitted.
 
-Start with review in auto mode unless the user explicitly requests a narrower mode.`),
+Start with review in auto mode unless the user explicitly requests a narrower mode.`,
+						),
 					},
 				},
 			}, nil
@@ -130,12 +141,21 @@ Start with review in auto mode unless the user explicitly requests a narrower mo
 
 func addReviewTool(s *server.MCPServer, depthFlag mcp.ToolOption, modelFlag mcp.ToolOption) {
 	s.AddTool(
-		mcp.NewTool("review",
-			mcp.WithDescription("Path-based LLM review. Auto mode reviews staged, worktree, PR, then repo input without sending source over gRPC."),
-			mcp.WithString("mode", mcp.Description("Review mode: auto (default), staged, worktree, pr, or repo.")),
+		mcp.NewTool(
+			"review",
+			mcp.WithDescription(
+				"Path-based LLM review. Auto mode reviews staged, worktree, PR, then repo input without sending source over gRPC.",
+			),
+			mcp.WithString(
+				"mode",
+				mcp.Description("Review mode: auto (default), staged, worktree, pr, or repo."),
+			),
 			depthFlag,
 			mcp.WithString("base_ref", mcp.Description("Optional base ref for PR mode.")),
-			mcp.WithString("path", mcp.Description("Path to git repo root (optional, auto-detected if omitted).")),
+			mcp.WithString(
+				"path",
+				mcp.Description("Path to git repo root (optional, auto-detected if omitted)."),
+			),
 			modelFlag,
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -145,27 +165,61 @@ func addReviewTool(s *server.MCPServer, depthFlag mcp.ToolOption, modelFlag mcp.
 			if err != nil {
 				return mcp.NewToolResultText(err.Error()), nil
 			}
+
 			mode, err := parseReviewMode(req.GetString("mode", "auto"))
 			if err != nil {
 				return mcp.NewToolResultText(err.Error()), nil
 			}
-			return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-				return c.Review(ctx, mode, repoRoot, depth, model, req.GetString("base_ref", ""))
-			})
+
+			return callDaemon(
+				ctx,
+				func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
+					return c.Review(
+						ctx,
+						mode,
+						repoRoot,
+						depth,
+						model,
+						req.GetString("base_ref", ""),
+					)
+				},
+			)
 		},
 	)
 }
 
 func addStaticTool(s *server.MCPServer, depthFlag mcp.ToolOption, modelFlag mcp.ToolOption) {
 	s.AddTool(
-		mcp.NewTool("review_static",
-			mcp.WithDescription("Run deterministic static analysis across the repo or changed Go files. Supports raw findings or LLM-synthesized review output."),
+		mcp.NewTool(
+			"review_static",
+			mcp.WithDescription(
+				"Run deterministic static analysis across the repo or changed Go files. "+
+					"Supports raw findings or LLM-synthesized review output.",
+			),
 			mcp.WithString("scope", mcp.Description("Analysis scope: diff, pr, or repo.")),
 			depthFlag,
-			mcp.WithBoolean("synthesize", mcp.Description("When true, synthesize analyzer findings with the LLM. When false, return raw deterministic findings only.")),
-			mcp.WithString("path", mcp.Description("Path to git repo root (optional, auto-detected if omitted).")),
-			mcp.WithArray("disabled_sources", mcp.Description("Optional source opt-out list: vet, staticcheck, custom, semgrep."), mcp.WithStringItems()),
-			mcp.WithArray("enabled_checks", mcp.Description("Optional exact check allowlist, such as SA4006 or slog_error_without_err."), mcp.WithStringItems()),
+			mcp.WithBoolean(
+				"synthesize",
+				mcp.Description(
+					"When true, synthesize analyzer findings with the LLM. When false, return raw deterministic findings only.",
+				),
+			),
+			mcp.WithString(
+				"path",
+				mcp.Description("Path to git repo root (optional, auto-detected if omitted)."),
+			),
+			mcp.WithArray(
+				"disabled_sources",
+				mcp.Description("Optional source opt-out list: vet, staticcheck, custom, semgrep."),
+				mcp.WithStringItems(),
+			),
+			mcp.WithArray(
+				"enabled_checks",
+				mcp.Description(
+					"Optional exact check allowlist, such as SA4006 or slog_error_without_err.",
+				),
+				mcp.WithStringItems(),
+			),
 			modelFlag,
 		),
 		callStaticReview,
@@ -177,28 +231,41 @@ func callStaticReview(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 	if err != nil {
 		return mcp.NewToolResultText(err.Error()), nil
 	}
+
 	scope := req.GetString("scope", "repo")
 	selectedFiles, err := staticFilesForScope(ctx, repoRoot, scope)
 	if err != nil {
 		return mcp.NewToolResultText(err.Error()), nil
 	}
-	return callDaemon(ctx, func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
-		return c.ReviewStatic(ctx, &reviewpb.StaticReviewRequest{
-			Path:            repoRoot,
-			Files:           selectedFiles,
-			DisabledSources: req.GetStringSlice("disabled_sources", []string{}),
-			EnabledChecks:   req.GetStringSlice("enabled_checks", []string{}),
-			Synthesize:      req.GetBool("synthesize", true),
-			Depth:           req.GetString("depth", "normal"),
-			Model:           req.GetString("model", ""),
-		})
-	})
+
+	return callDaemon(
+		ctx,
+		func(c *daemon.Client) (*reviewpb.ReviewResponse, error) {
+			return c.ReviewStatic(
+				ctx,
+				&reviewpb.StaticReviewRequest{
+					Path:            repoRoot,
+					Files:           selectedFiles,
+					DisabledSources: req.GetStringSlice("disabled_sources", []string{}),
+					EnabledChecks:   req.GetStringSlice("enabled_checks", []string{}),
+					Synthesize:      req.GetBool("synthesize", true),
+					Depth:           req.GetString("depth", "normal"),
+					Model:           req.GetString("model", ""),
+				},
+			)
+		},
+	)
 }
 
-func callDaemon(ctx context.Context, fn func(*daemon.Client) (*reviewpb.ReviewResponse, error)) (*mcp.CallToolResult, error) {
+func callDaemon(
+	ctx context.Context,
+	fn func(*daemon.Client) (*reviewpb.ReviewResponse, error),
+) (*mcp.CallToolResult, error) {
 	client, err := daemon.Connect(ctx)
 	if err != nil {
-		return mcp.NewToolResultText(fmt.Sprintf("lm-review daemon unavailable (is LM Studio running?): %v", err)), nil
+		return mcp.NewToolResultText(
+			fmt.Sprintf("lm-review daemon unavailable (is LM Studio running?): %v", err),
+		), nil
 	}
 	defer client.Close()
 
@@ -237,7 +304,10 @@ func parseReviewMode(mode string) (reviewpb.ReviewMode, error) {
 	case reviewModeNameRepo:
 		return reviewpb.ReviewMode_REVIEW_MODE_REPO, nil
 	default:
-		return reviewpb.ReviewMode_REVIEW_MODE_UNSPECIFIED, fmt.Errorf("unknown review mode %q", mode)
+		return reviewpb.ReviewMode_REVIEW_MODE_UNSPECIFIED, fmt.Errorf(
+			"unknown review mode %q",
+			mode,
+		)
 	}
 }
 
@@ -247,6 +317,7 @@ func formatResponse(resp *reviewpb.ReviewResponse) string {
 	fmt.Fprintf(&sb, "%s (%s, %dms): %s", icon, resp.Model, resp.GetLatencyMs(), resp.GetSummary())
 	if len(resp.Issues) > 0 {
 		sb.WriteString("\n\n| Severity | File | Line | Rule | Message |\n|---|---|---|---|---|\n")
+
 		for _, issue := range resp.Issues {
 			fmt.Fprintf(
 				&sb,
@@ -259,6 +330,7 @@ func formatResponse(resp *reviewpb.ReviewResponse) string {
 			)
 		}
 	}
+
 	return sb.String()
 }
 
@@ -280,6 +352,7 @@ func staticFilesForScope(ctx context.Context, repoRoot string, scope string) ([]
 			log.ErrorContext(ctx, "mcp.static_files.staged_diff_failed", "err", err)
 			return nil, fmt.Errorf("load staged diff: %w", err)
 		}
+
 		return goFilesOnly(review.FilesFromDiff(diff)), nil
 	case staticScopeNamePR:
 		diff, err := gitutil.PRDiff(repoRoot, "")
@@ -287,6 +360,7 @@ func staticFilesForScope(ctx context.Context, repoRoot string, scope string) ([]
 			log.ErrorContext(ctx, "mcp.static_files.pr_diff_failed", "err", err)
 			return nil, fmt.Errorf("load PR diff: %w", err)
 		}
+
 		return goFilesOnly(review.FilesFromDiff(diff)), nil
 	case staticScopeNameRepo, staticScopeNameEmpty:
 		return nil, nil
@@ -302,5 +376,6 @@ func goFilesOnly(files []string) []string {
 			filtered = append(filtered, file)
 		}
 	}
+
 	return filtered
 }

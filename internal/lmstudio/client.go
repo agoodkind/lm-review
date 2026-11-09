@@ -75,12 +75,20 @@ type ChatResult struct {
 
 // New creates a Client targeting the given OpenAI-compatible base URL with the provided token.
 // maxTokens caps the response length to prevent infinite generation loops.
-func New(baseURL, token, model string, maxTokens int, requestTimeout time.Duration, settings config.ChatSettings) *Client {
+func New(
+	baseURL string,
+	token string,
+	model string,
+	maxTokens int,
+	requestTimeout time.Duration,
+	settings config.ChatSettings,
+) *Client {
 	c := openai.NewClient(
 		option.WithBaseURL(baseURL+"/v1"),
 		option.WithAPIKey(token),
 		option.WithHTTPClient(&http.Client{}),
 	)
+
 	return &Client{
 		inner:          c,
 		baseURL:        baseURL,
@@ -103,12 +111,24 @@ func (c *Client) ChatReview(ctx context.Context, systemPrompt, userMessage strin
 }
 
 // ChatSchema sends a prompt and input while requiring the supplied JSON Schema.
-func (c *Client) ChatSchema(ctx context.Context, prompt, input string, schema json.RawMessage) (string, error) {
-	result, err := c.ChatSchemaDetailed(ctx, prompt, input, schema, SchemaGenerationOptions{
-		ReasoningEffort:     "",
-		MaxCompletionTokens: nil,
-		Temperature:         nil,
-	})
+func (c *Client) ChatSchema(
+	ctx context.Context,
+	prompt string,
+	input string,
+	schema json.RawMessage,
+) (string, error) {
+	result, err := c.ChatSchemaDetailed(
+		ctx,
+		prompt,
+		input,
+		schema,
+		SchemaGenerationOptions{
+			ReasoningEffort:     "",
+			MaxCompletionTokens: nil,
+			Temperature:         nil,
+		},
+	)
+
 	return result.Content, err
 }
 
@@ -124,10 +144,16 @@ func (c *Client) ChatSchemaDetailed(
 	if schemaGenerationOptionsEmpty(options) {
 		return c.chatDetailed(ctx, prompt, input, &responseFormat, nil)
 	}
+
 	return c.chatDetailed(ctx, prompt, input, &responseFormat, &options)
 }
 
-func (c *Client) chat(ctx context.Context, systemPrompt, userMessage string, responseFormat *openai.ChatCompletionNewParamsResponseFormatUnion) (string, error) {
+func (c *Client) chat(
+	ctx context.Context,
+	systemPrompt string,
+	userMessage string,
+	responseFormat *openai.ChatCompletionNewParamsResponseFormatUnion,
+) (string, error) {
 	result, err := c.chatDetailed(ctx, systemPrompt, userMessage, responseFormat, nil)
 	return result.Content, err
 }
@@ -156,28 +182,53 @@ func (c *Client) chatDetailed(
 	latency := clock.Since(start)
 	if err != nil {
 		safeError := newChatRequestError(ctx, err, responseStatusCode(httpResp))
-		log.ErrorContext(ctx, "openai.chat.failed",
-			"latency_ms", latency.Milliseconds(),
-			"status_code", responseStatusCode(httpResp),
-			"error_type", fmt.Sprintf("%T", err),
-			"err", safeError)
+		log.ErrorContext(
+			ctx,
+			"openai.chat.failed",
+			"latency_ms",
+			latency.Milliseconds(),
+			"status_code",
+			responseStatusCode(httpResp),
+			"error_type",
+			fmt.Sprintf("%T", err),
+			"err",
+			safeError,
+		)
+
 		return ChatResult{}, safeError
 	}
+
 	if len(resp.Choices) == 0 {
 		err := fmt.Errorf("OpenAI-compatible backend returned no choices")
-		log.ErrorContext(ctx, "openai.chat.no_choices",
-			"latency_ms", latency.Milliseconds(),
-			"status_code", responseStatusCode(httpResp),
-			"err", err)
+		log.ErrorContext(
+			ctx,
+			"openai.chat.no_choices",
+			"latency_ms",
+			latency.Milliseconds(),
+			"status_code",
+			responseStatusCode(httpResp),
+			"err",
+			err,
+		)
+
 		return ChatResult{}, err
 	}
+
 	content := resp.Choices[0].Message.Content
 	if err := detectRepetition(content); err != nil {
-		log.ErrorContext(ctx, "openai.chat.repetition_detected",
-			"latency_ms", latency.Milliseconds(),
-			"status_code", responseStatusCode(httpResp),
-			"response_bytes", len(content),
-			"err", err)
+		log.ErrorContext(
+			ctx,
+			"openai.chat.repetition_detected",
+			"latency_ms",
+			latency.Milliseconds(),
+			"status_code",
+			responseStatusCode(httpResp),
+			"response_bytes",
+			len(content),
+			"err",
+			err,
+		)
+
 		return ChatResult{
 			Content:                 content,
 			RequestID:               "",
@@ -197,11 +248,31 @@ func (c *Client) chatDetailed(
 			ConfidencePresent:       false,
 		}, err
 	}
-	log.InfoContext(ctx, "openai.chat.end",
-		"latency_ms", latency.Milliseconds(),
-		"status_code", responseStatusCode(httpResp),
-		"choice_count", len(resp.Choices),
-		"response_bytes", len(content))
+
+	return chatResultFromResponse(ctx, log, content, requestID, resp, httpResp, latency), nil
+}
+
+func chatResultFromResponse(
+	ctx context.Context,
+	log *slog.Logger,
+	content string,
+	requestID string,
+	resp *openai.ChatCompletion,
+	httpResp *http.Response,
+	latency time.Duration,
+) ChatResult {
+	log.InfoContext(
+		ctx,
+		"openai.chat.end",
+		"latency_ms",
+		latency.Milliseconds(),
+		"status_code",
+		responseStatusCode(httpResp),
+		"choice_count",
+		len(resp.Choices),
+		"response_bytes",
+		len(content),
+	)
 	backendVersion := ""
 	if httpResp != nil {
 		backendVersion = firstHeader(
@@ -211,8 +282,10 @@ func (c *Client) chatDetailed(
 			"OpenAI-Version",
 		)
 	}
+
 	usagePresence := parseTokenUsagePresence(resp.RawJSON())
 	confidence, confidencePresent := logprobConfidence(resp.Choices[0].Logprobs)
+
 	return ChatResult{
 		Content:                 content,
 		RequestID:               requestID,
@@ -230,7 +303,7 @@ func (c *Client) chatDetailed(
 		Latency:                 latency,
 		Confidence:              confidence,
 		ConfidencePresent:       confidencePresent,
-	}, nil
+	}
 }
 
 // logprobConfidence derives a confidence in [0, 1] from per-token logprobs. It
@@ -244,10 +317,12 @@ func logprobConfidence(logprobs openai.ChatCompletionChoiceLogprobs) (float64, b
 	if len(tokens) == 0 {
 		return 0, false
 	}
+
 	values := make([]float64, len(tokens))
 	for index, token := range tokens {
 		values[index] = token.Logprob
 	}
+
 	return minLogprobConfidence(values), true
 }
 
@@ -261,6 +336,7 @@ func minLogprobConfidence(logprobs []float64) float64 {
 			minLogprob = value
 		}
 	}
+
 	return math.Min(1, math.Max(0, math.Exp(minLogprob)))
 }
 
@@ -281,6 +357,7 @@ func parseTokenUsagePresence(rawResponse string) tokenUsagePresence {
 			total:      false,
 		}
 	}
+
 	return tokenUsagePresence{
 		prompt:     nonNullJSONField(response.Usage, "prompt_tokens"),
 		completion: nonNullJSONField(response.Usage, "completion_tokens"),
@@ -293,6 +370,7 @@ func nonNullJSONField(fields map[string]json.RawMessage, name string) bool {
 	if !ok {
 		return false
 	}
+
 	return strings.TrimSpace(string(value)) != "null"
 }
 
@@ -309,6 +387,7 @@ func backendFingerprint(rawResponse string) string {
 	if err := json.Unmarshal([]byte(rawResponse), &metadata); err != nil {
 		return ""
 	}
+
 	return metadata.SystemFingerprint
 }
 
@@ -323,9 +402,12 @@ func newChatRequestError(ctx context.Context, requestError error, statusCode int
 	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(requestError, context.Canceled) {
 		cause = context.Canceled
 	}
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(requestError, context.DeadlineExceeded) {
+
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) ||
+		errors.Is(requestError, context.DeadlineExceeded) {
 		cause = context.DeadlineExceeded
 	}
+
 	return &chatRequestError{
 		statusCode: statusCode,
 		errorType:  fmt.Sprintf("%T", requestError),
@@ -341,6 +423,7 @@ func (e *chatRequestError) Error() string {
 			e.errorType,
 		)
 	}
+
 	return "OpenAI-compatible chat failed: error type " + e.errorType
 }
 
@@ -348,37 +431,72 @@ func (e *chatRequestError) Unwrap() error {
 	return e.cause
 }
 
-func (c *Client) requestLogger(ctx context.Context, metadata requestmeta.Metadata, requestID, systemPrompt, userMessage string) *slog.Logger {
+func (c *Client) requestLogger(
+	ctx context.Context,
+	metadata requestmeta.Metadata,
+	requestID string,
+	systemPrompt string,
+	userMessage string,
+) *slog.Logger {
 	return gklog.LoggerFromContext(ctx).With(
-		"component", "lm-review",
-		"subcomponent", "openai_compat",
-		"request_id", requestID,
-		"review_id", metadata.ReviewID,
-		"scope", metadata.Scope,
-		"mode", metadata.Mode,
-		"depth", metadata.Depth,
-		"chunk_index", metadata.ChunkIndex,
-		"chunk_total", metadata.ChunkTotal,
-		"base_url", c.baseURL,
-		"model", c.model,
-		"system_bytes", len(systemPrompt),
-		"user_bytes", len(userMessage),
-		"max_response_tokens", c.maxTokens,
-		"temperature", c.settings.Temperature,
-		"top_p", derefFloat64(c.settings.TopP),
-		"top_p_set", c.settings.TopP != nil,
-		"top_k", derefInt(c.settings.TopK),
-		"top_k_set", c.settings.TopK != nil,
-		"presence_penalty", derefFloat64(c.settings.PresencePenalty),
-		"presence_penalty_set", c.settings.PresencePenalty != nil,
-		"frequency_penalty", derefFloat64(c.settings.FrequencyPenalty),
-		"frequency_penalty_set", c.settings.FrequencyPenalty != nil,
-		"repeat_penalty", derefFloat64(c.settings.RepeatPenalty),
-		"repeat_penalty_set", c.settings.RepeatPenalty != nil,
-		"seed", derefInt64(c.settings.Seed),
-		"seed_set", c.settings.Seed != nil,
-		"stop_count", len(c.settings.Stop),
-		"timeout_ms", c.requestTimeout.Milliseconds(),
+		"component",
+		"lm-review",
+		"subcomponent",
+		"openai_compat",
+		"request_id",
+		requestID,
+		"review_id",
+		metadata.ReviewID,
+		"scope",
+		metadata.Scope,
+		"mode",
+		metadata.Mode,
+		"depth",
+		metadata.Depth,
+		"chunk_index",
+		metadata.ChunkIndex,
+		"chunk_total",
+		metadata.ChunkTotal,
+		"base_url",
+		c.baseURL,
+		"model",
+		c.model,
+		"system_bytes",
+		len(systemPrompt),
+		"user_bytes",
+		len(userMessage),
+		"max_response_tokens",
+		c.maxTokens,
+		"temperature",
+		c.settings.Temperature,
+		"top_p",
+		derefFloat64(c.settings.TopP),
+		"top_p_set",
+		c.settings.TopP != nil,
+		"top_k",
+		derefInt(c.settings.TopK),
+		"top_k_set",
+		c.settings.TopK != nil,
+		"presence_penalty",
+		derefFloat64(c.settings.PresencePenalty),
+		"presence_penalty_set",
+		c.settings.PresencePenalty != nil,
+		"frequency_penalty",
+		derefFloat64(c.settings.FrequencyPenalty),
+		"frequency_penalty_set",
+		c.settings.FrequencyPenalty != nil,
+		"repeat_penalty",
+		derefFloat64(c.settings.RepeatPenalty),
+		"repeat_penalty_set",
+		c.settings.RepeatPenalty != nil,
+		"seed",
+		derefInt64(c.settings.Seed),
+		"seed_set",
+		c.settings.Seed != nil,
+		"stop_count",
+		len(c.settings.Stop),
+		"timeout_ms",
+		c.requestTimeout.Milliseconds(),
 	)
 }
 
@@ -396,18 +514,23 @@ func (c *Client) requestOptions(
 	if metadata.ReviewID != "" {
 		opts = append(opts, option.WithHeader("X-LM-Review-ID", metadata.ReviewID))
 	}
+
 	if metadata.ChunkIndex > 0 && metadata.ChunkTotal > 0 {
-		opts = append(opts,
+		opts = append(
+			opts,
 			option.WithHeader("X-LM-Review-Chunk-Index", strconv.Itoa(metadata.ChunkIndex)),
 			option.WithHeader("X-LM-Review-Chunk-Total", strconv.Itoa(metadata.ChunkTotal)),
 		)
 	}
+
 	if includeConfiguredGenerationOptions && c.settings.TopK != nil {
 		opts = append(opts, option.WithJSONSet("top_k", *c.settings.TopK))
 	}
+
 	if includeConfiguredGenerationOptions && c.settings.RepeatPenalty != nil {
 		opts = append(opts, option.WithJSONSet("repeat_penalty", *c.settings.RepeatPenalty))
 	}
+
 	return opts
 }
 
@@ -433,10 +556,12 @@ func (c *Client) chatParams(
 		if schemaOptions.MaxCompletionTokens != nil {
 			maxCompletionTokens = *schemaOptions.MaxCompletionTokens
 		}
+
 		params.MaxCompletionTokens = param.NewOpt(maxCompletionTokens)
 		if schemaOptions.ReasoningEffort != "" {
 			params.ReasoningEffort = shared.ReasoningEffort(schemaOptions.ReasoningEffort)
 		}
+
 		if schemaOptions.Temperature != nil {
 			params.Temperature = param.NewOpt(*schemaOptions.Temperature)
 		}
@@ -447,26 +572,33 @@ func (c *Client) chatParams(
 		// speaks max_completion_tokens, which is the point of using the SDK.
 		params.MaxCompletionTokens = param.NewOpt[int64](c.maxTokens)
 	}
+
 	if schemaOptions == nil && c.settings.TopP != nil {
 		params.TopP = param.NewOpt(*c.settings.TopP)
 	}
+
 	if schemaOptions == nil && c.settings.PresencePenalty != nil {
 		params.PresencePenalty = param.NewOpt(*c.settings.PresencePenalty)
 	}
+
 	if schemaOptions == nil && c.settings.FrequencyPenalty != nil {
 		params.FrequencyPenalty = param.NewOpt(*c.settings.FrequencyPenalty)
 	}
+
 	if schemaOptions == nil && c.settings.Seed != nil {
 		params.Seed = param.NewOpt(*c.settings.Seed)
 	}
+
 	if schemaOptions == nil && len(c.settings.Stop) > 0 {
 		params.Stop = openai.ChatCompletionNewParamsStopUnion{
 			OfStringArray: append([]string{}, c.settings.Stop...),
 		}
 	}
+
 	if responseFormat != nil {
 		params.ResponseFormat = *responseFormat
 	}
+
 	return params
 }
 
@@ -476,6 +608,7 @@ func firstHeader(header http.Header, names ...string) string {
 			return value
 		}
 	}
+
 	return ""
 }
 
@@ -483,6 +616,7 @@ func responseStatusCode(resp *http.Response) int {
 	if resp == nil {
 		return 0
 	}
+
 	return resp.StatusCode
 }
 
@@ -490,6 +624,7 @@ func derefFloat64(value *float64) float64 {
 	if value == nil {
 		return 0
 	}
+
 	return *value
 }
 
@@ -497,6 +632,7 @@ func derefInt(value *int) int {
 	if value == nil {
 		return 0
 	}
+
 	return *value
 }
 
@@ -504,6 +640,7 @@ func derefInt64(value *int64) int64 {
 	if value == nil {
 		return 0
 	}
+
 	return *value
 }
 
@@ -512,6 +649,7 @@ func newChatRequestID() string {
 	if _, err := rand.Read(raw[:]); err == nil {
 		return "lmchat-" + hex.EncodeToString(raw[:])
 	}
+
 	return fmt.Sprintf("lmchat-%d", clock.Now().UnixNano())
 }
 
@@ -522,12 +660,18 @@ func detectRepetition(s string) error {
 	if len(s) < repWindowSize*repThreshold {
 		return nil
 	}
+
 	// Scan from the end: take a window and count how many times it appears.
 	tail := s[len(s)-repWindowSize:]
 	count := strings.Count(s, tail)
 	if count >= repThreshold {
-		return fmt.Errorf("repetition loop detected: %d-char block repeated %d times, response likely degenerate", repWindowSize, count)
+		return fmt.Errorf(
+			"repetition loop detected: %d-char block repeated %d times, response likely degenerate",
+			repWindowSize,
+			count,
+		)
 	}
+
 	return nil
 }
 
@@ -542,5 +686,6 @@ func (c *Client) Ping(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("LM Studio unreachable: %w", err)
 	}
+
 	return nil
 }

@@ -22,12 +22,15 @@ func New(model string) *Client {
 func (c *Client) Chat(ctx context.Context, systemPrompt, userMessage string) (string, error) {
 	args := []string{
 		"-p",
-		"--system-prompt", systemPrompt,
-		"--output-format", "text",
+		"--system-prompt",
+		systemPrompt,
+		"--output-format",
+		"text",
 	}
 	if c.model != "" {
 		args = append(args, "--model", c.model)
 	}
+
 	args = append(args, userMessage)
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
@@ -37,6 +40,7 @@ func (c *Client) Chat(ctx context.Context, systemPrompt, userMessage string) (st
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			stderr = string(exitErr.Stderr)
 		}
+
 		return "", fmt.Errorf("claude -p: %w\n%s", err, stderr)
 	}
 
@@ -48,5 +52,6 @@ func (c *Client) ModelID() string {
 	if c.model == "" {
 		return "claude"
 	}
+
 	return "claude:" + c.model
 }
