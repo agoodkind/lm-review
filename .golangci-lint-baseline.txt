@@ -1,4 +1,4 @@
-# golangci-lint: generated_at=2026-11-09T02:42:53Z
+# golangci-lint: generated_at=2026-11-09T17:01:28Z
 api/inferencepb/inference_contract_test.go:84:2: missing whitespace below this line (after-block) (wsl_v5)	# golangci-lint:first_added=2026-11-09T02:42:53Z last_seen=2026-11-09T02:42:53Z
 api/inferencepb/inference_contract_test.go:54:2: missing whitespace above this line (too many statements above range) (wsl_v5)	# golangci-lint:first_added=2026-11-08T23:08:57Z last_seen=2026-11-09T02:42:53Z
 api/inferencepb/inference_contract_test.go:79:2: missing whitespace above this line (invalid statement above range) (wsl_v5)	# golangci-lint:first_added=2026-11-08T23:08:57Z last_seen=2026-11-09T02:42:53Z
@@ -581,15 +581,12 @@ internal/daemon/server.go:407:9: error returned from external package is unwrapp
 internal/daemon/server.go:65:29: net.Listen must not be called. use (*net.ListenConfig).Listen (noctx)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
 internal/daemon/server.go:71:10: daemon.Server is missing field UnimplementedLMReviewDServer (exhaustruct)	# golangci-lint:first_added=2026-05-05T00:59:06Z last_seen=2026-05-05T15:29:13Z
 internal/daemon/server.go:77:9: error returned from external package is unwrapped: sig: func (*google.golang.org/grpc.Server).Serve(lis net.Listener) error (wrapcheck)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
-internal/github/comment.go:19:3: error is not nil (line 16) but it returns nil (nilerr)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
-internal/github/comment.go:35:26: os/exec.Command must not be called. use os/exec.CommandContext (noctx)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
 internal/github/comment.go:61:3: error is not nil (line 60) but it returns nil (nilerr)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
+internal/github/comment.go:35:26: os/exec.Command must not be called. use os/exec.CommandContext (noctx)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
 internal/gitutil/gitutil.go:107:35: os/exec.Command must not be called. use os/exec.CommandContext (noctx)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
 internal/lmstudio/detect.go:60:15: error returned from external package is unwrapped: sig: func net/http.NewRequestWithContext(ctx context.Context, method string, url string, body io.Reader) (*net/http.Request, error) (wrapcheck)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
 internal/lmstudio/detect.go:70:15: error returned from external package is unwrapped: sig: func (*net/http.Client).Do(req *net/http.Request) (*net/http.Response, error) (wrapcheck)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
 internal/lmstudio/detect.go:90:15: error returned from external package is unwrapped: sig: func (*encoding/json.Decoder).Decode(v any) error (wrapcheck)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
-internal/mcpserver/server.go:147:5: error is not nil (line 145) but it returns nil (nilerr)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
-internal/mcpserver/server.go:171:5: error is not nil (line 169) but it returns nil (nilerr)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
 internal/mcpserver/server.go:195:5: error is not nil (line 193) but it returns nil (nilerr)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
 internal/mcpserver/server.go:23:6: Function 'Serve' is too long (212 > 100) (funlen)	# golangci-lint:first_added=2026-05-05T15:29:13Z last_seen=2026-05-05T15:29:13Z
 internal/mcpserver/server.go:238:9: error returned from external package is unwrapped: sig: func github.com/mark3labs/mcp-go/server.ServeStdio(server *github.com/mark3labs/mcp-go/server.MCPServer, opts ...github.com/mark3labs/mcp-go/server.StdioOption) error (wrapcheck)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
@@ -601,5 +598,4 @@ internal/review/chunked.go:106:13: review.Result is missing fields Stats, Latenc
 internal/review/chunked.go:190:2: missing cases in switch of type review.Verdict: review.VerdictPass, review.VerdictSkip (exhaustive)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
 internal/review/chunked.go:64:15: error returned from external package is unwrapped: sig: func (*golang.org/x/sync/errgroup.Group).Wait() error (wrapcheck)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
 internal/review/reviewer.go:41:11: review.Result is missing fields Issues, Stats, Highlights, TechDebt, LatencyMs (exhaustruct)	# golangci-lint:first_added=2026-05-05T00:59:06Z last_seen=2026-05-05T15:29:13Z
-internal/review/verify.go:48:3: error is not nil (line 46) but it returns nil (nilerr)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
 internal/review/verify.go:55:3: error is not nil (line 54) but it returns nil (nilerr)	# golangci-lint:first_added=2026-05-05T00:25:42Z last_seen=2026-05-05T15:29:13Z
