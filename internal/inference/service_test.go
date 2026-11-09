@@ -35,12 +35,16 @@ func (f modelFunc) Infer(ctx context.Context, call ModelRequest) (ModelResult, e
 }
 
 func TestInferSupportsUnrelatedCallerSchemas(t *testing.T) {
-	server := NewServer("fallback-model", modelFunc(func(_ context.Context, call ModelRequest) (ModelResult, error) {
-		if strings.Contains(call.OutputSchema, `"decision"`) {
-			return modelOutput(`{"decision":"allow"}`), nil
-		}
-		return modelOutput(`{"breed":"Labrador","traits":["friendly"]}`), nil
-	}))
+	server := NewServer(
+		"fallback-model",
+		modelFunc(func(_ context.Context, call ModelRequest) (ModelResult, error) {
+			if strings.Contains(call.OutputSchema, `"decision"`) {
+				return modelOutput(`{"decision":"allow"}`), nil
+			}
+
+			return modelOutput(`{"breed":"Labrador","traits":["friendly"]}`), nil
+		}),
+	)
 
 	tests := []struct {
 		name       string
@@ -48,52 +52,92 @@ func TestInferSupportsUnrelatedCallerSchemas(t *testing.T) {
 		wantOutput string
 	}{
 		{name: "decision", schema: decisionSchema, wantOutput: `{"decision":"allow"}`},
-		{name: "dog breed", schema: dogSchema, wantOutput: `{"breed":"Labrador","traits":["friendly"]}`},
+		{
+			name:       "dog breed",
+			schema:     dogSchema,
+			wantOutput: `{"breed":"Labrador","traits":["friendly"]}`,
+		},
 	}
 	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			reply, err := server.Infer(context.Background(), validRequest(test.schema))
-			if err != nil {
-				t.Fatalf("Infer returned error: %v", err)
-			}
-			if reply.GetOutputJson() != test.wantOutput {
-				t.Fatalf("output_json=%q, want %q", reply.GetOutputJson(), test.wantOutput)
-			}
-			if reply.GetStatus() != inferencepb.InferenceStatus_INFERENCE_STATUS_COMPLETE {
-				t.Fatalf("status=%s, want complete", reply.GetStatus())
-			}
-		})
+		t.Run(
+			test.name,
+			func(t *testing.T) {
+				reply, err := server.Infer(context.Background(), validRequest(test.schema))
+				if err != nil {
+					t.Fatalf("Infer returned error: %v", err)
+				}
+
+				if reply.GetOutputJson() != test.wantOutput {
+					t.Fatalf("output_json=%q, want %q", reply.GetOutputJson(), test.wantOutput)
+				}
+
+				if reply.GetStatus() != inferencepb.InferenceStatus_INFERENCE_STATUS_COMPLETE {
+					t.Fatalf("status=%s, want complete", reply.GetStatus())
+				}
+			},
+		)
 	}
 }
 
 func TestInferRejectsInvalidRequestsBeforeModelInvocation(t *testing.T) {
 	var calls atomic.Int32
-	server := NewServer("fallback-model", modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
-		calls.Add(1)
-		return modelOutput(`{}`), nil
-	}))
+	server := NewServer(
+		"fallback-model",
+		modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+			calls.Add(1)
+			return modelOutput(`{}`), nil
+		}),
+	)
 
 	tests := []struct {
 		name    string
 		request *inferencepb.InferRequest
 	}{
-		{name: "empty prompt", request: &inferencepb.InferRequest{Input: "input", OutputSchema: dogSchema}},
-		{name: "empty input", request: &inferencepb.InferRequest{Prompt: "prompt", OutputSchema: dogSchema}},
+		{
+			name:    "empty prompt",
+			request: &inferencepb.InferRequest{Input: "input", OutputSchema: dogSchema},
+		},
+		{
+			name:    "empty input",
+			request: &inferencepb.InferRequest{Prompt: "prompt", OutputSchema: dogSchema},
+		},
 		{name: "malformed schema", request: validRequest(`{"type":`)},
 		{name: "invalid schema", request: validRequest(`{"type":"not-a-type"}`)},
 		{name: "malformed context", request: withContext(validRequest(dogSchema), `{"secret":`)},
-		{name: "unknown reasoning effort", request: withOptions(validRequest(dogSchema), &inferencepb.GenerationOptions{ReasoningEffort: inferencepb.ReasoningEffort(99)})},
-		{name: "zero max completion tokens", request: withOptions(validRequest(dogSchema), &inferencepb.GenerationOptions{MaxCompletionTokens: int64Pointer(0)})},
-		{name: "invalid temperature", request: withOptions(validRequest(dogSchema), &inferencepb.GenerationOptions{Temperature: float64Pointer(math.NaN())})},
+		{
+			name: "unknown reasoning effort",
+			request: withOptions(
+				validRequest(dogSchema),
+				&inferencepb.GenerationOptions{ReasoningEffort: inferencepb.ReasoningEffort(99)},
+			),
+		},
+		{
+			name: "zero max completion tokens",
+			request: withOptions(
+				validRequest(dogSchema),
+				&inferencepb.GenerationOptions{MaxCompletionTokens: int64Pointer(0)},
+			),
+		},
+		{
+			name: "invalid temperature",
+			request: withOptions(
+				validRequest(dogSchema),
+				&inferencepb.GenerationOptions{Temperature: float64Pointer(math.NaN())},
+			),
+		},
 	}
 	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := server.Infer(context.Background(), test.request)
-			if status.Code(err) != codes.InvalidArgument {
-				t.Fatalf("code=%s, want invalid argument", status.Code(err))
-			}
-		})
+		t.Run(
+			test.name,
+			func(t *testing.T) {
+				_, err := server.Infer(context.Background(), test.request)
+				if status.Code(err) != codes.InvalidArgument {
+					t.Fatalf("code=%s, want invalid argument", status.Code(err))
+				}
+			},
+		)
 	}
+
 	if calls.Load() != 0 {
 		t.Fatalf("model calls=%d, want 0", calls.Load())
 	}
@@ -109,19 +153,33 @@ func TestInferRejectsInvalidModelOutput(t *testing.T) {
 		{name: "missing required", schema: dogSchema, output: `{"breed":"Poodle"}`},
 		{name: "enum", schema: decisionSchema, output: `{"decision":"maybe"}`},
 		{name: "type", schema: dogSchema, output: `{"breed":7,"traits":["friendly"]}`},
-		{name: "additional properties", schema: decisionSchema, output: `{"decision":"allow","reason":"extra"}`},
-		{name: "nested constraint", schema: dogSchema, output: `{"breed":"Poodle","traits":["quiet"]}`},
+		{
+			name:   "additional properties",
+			schema: decisionSchema,
+			output: `{"decision":"allow","reason":"extra"}`,
+		},
+		{
+			name:   "nested constraint",
+			schema: dogSchema,
+			output: `{"breed":"Poodle","traits":["quiet"]}`,
+		},
 	}
 	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			server := NewServer("fallback-model", modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
-				return modelOutput(test.output), nil
-			}))
-			_, err := server.Infer(context.Background(), validRequest(test.schema))
-			if status.Code(err) != codes.DataLoss {
-				t.Fatalf("code=%s, want data loss", status.Code(err))
-			}
-		})
+		t.Run(
+			test.name,
+			func(t *testing.T) {
+				server := NewServer(
+					"fallback-model",
+					modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+						return modelOutput(test.output), nil
+					}),
+				)
+				_, err := server.Infer(context.Background(), validRequest(test.schema))
+				if status.Code(err) != codes.DataLoss {
+					t.Fatalf("code=%s, want data loss", status.Code(err))
+				}
+			},
+		)
 	}
 }
 
@@ -132,24 +190,51 @@ func TestInferNormalizesBareEnumTokenForSingleFieldObject(t *testing.T) {
 		output     string
 		wantOutput string
 	}{
-		{name: "exact token", schema: decisionSchema, output: "block", wantOutput: `{"decision":"block"}`},
-		{name: "boolean-shaped", schema: singleEnumSchema("true"), output: "true", wantOutput: `{"decision":"true"}`},
-		{name: "null-shaped", schema: singleEnumSchema("null"), output: "null", wantOutput: `{"decision":"null"}`},
-		{name: "number-shaped", schema: singleEnumSchema("123"), output: "123", wantOutput: `{"decision":"123"}`},
+		{
+			name:       "exact token",
+			schema:     decisionSchema,
+			output:     "block",
+			wantOutput: `{"decision":"block"}`,
+		},
+		{
+			name:       "boolean-shaped",
+			schema:     singleEnumSchema("true"),
+			output:     "true",
+			wantOutput: `{"decision":"true"}`,
+		},
+		{
+			name:       "null-shaped",
+			schema:     singleEnumSchema("null"),
+			output:     "null",
+			wantOutput: `{"decision":"null"}`,
+		},
+		{
+			name:       "number-shaped",
+			schema:     singleEnumSchema("123"),
+			output:     "123",
+			wantOutput: `{"decision":"123"}`,
+		},
 	}
 	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			server := NewServer("fallback-model", modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
-				return modelOutput(test.output), nil
-			}))
-			reply, err := server.Infer(context.Background(), validRequest(test.schema))
-			if err != nil {
-				t.Fatalf("Infer returned error: %v", err)
-			}
-			if reply.GetOutputJson() != test.wantOutput {
-				t.Fatalf("output_json=%q, want %q", reply.GetOutputJson(), test.wantOutput)
-			}
-		})
+		t.Run(
+			test.name,
+			func(t *testing.T) {
+				server := NewServer(
+					"fallback-model",
+					modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+						return modelOutput(test.output), nil
+					}),
+				)
+				reply, err := server.Infer(context.Background(), validRequest(test.schema))
+				if err != nil {
+					t.Fatalf("Infer returned error: %v", err)
+				}
+
+				if reply.GetOutputJson() != test.wantOutput {
+					t.Fatalf("output_json=%q, want %q", reply.GetOutputJson(), test.wantOutput)
+				}
+			},
+		)
 	}
 }
 
@@ -166,15 +251,21 @@ func TestInferRejectsBareTokenOutsideSingleEnumObjectSchema(t *testing.T) {
 		{name: "different case", schema: decisionSchema, output: "BLOCK"},
 	}
 	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			server := NewServer("fallback-model", modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
-				return modelOutput(test.output), nil
-			}))
-			_, err := server.Infer(context.Background(), validRequest(test.schema))
-			if status.Code(err) != codes.DataLoss {
-				t.Fatalf("code=%s, want data loss", status.Code(err))
-			}
-		})
+		t.Run(
+			test.name,
+			func(t *testing.T) {
+				server := NewServer(
+					"fallback-model",
+					modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+						return modelOutput(test.output), nil
+					}),
+				)
+				_, err := server.Infer(context.Background(), validRequest(test.schema))
+				if status.Code(err) != codes.DataLoss {
+					t.Fatalf("code=%s, want data loss", status.Code(err))
+				}
+			},
+		)
 	}
 }
 
@@ -184,23 +275,29 @@ func singleEnumSchema(value string) string {
 
 func TestInferSelectsRequestModelOrFallback(t *testing.T) {
 	var models []string
-	server := NewServer("fallback-model", modelFunc(func(_ context.Context, call ModelRequest) (ModelResult, error) {
-		models = append(models, call.Model)
-		return modelOutput(`{"decision":"allow"}`), nil
-	}))
+	server := NewServer(
+		"fallback-model",
+		modelFunc(func(_ context.Context, call ModelRequest) (ModelResult, error) {
+			models = append(models, call.Model)
+			return modelOutput(`{"decision":"allow"}`), nil
+		}),
+	)
 
 	override := validRequest(decisionSchema)
 	override.Model = "request-model"
 	if _, err := server.Infer(context.Background(), override); err != nil {
 		t.Fatalf("override Infer returned error: %v", err)
 	}
+
 	fallbackReply, err := server.Infer(context.Background(), validRequest(decisionSchema))
 	if err != nil {
 		t.Fatalf("fallback Infer returned error: %v", err)
 	}
+
 	if got := fallbackReply.GetMetadata().GetActualModel(); got != "" {
 		t.Fatalf("actual model=%q, want empty when backend omits identity", got)
 	}
+
 	if got := strings.Join(models, ","); got != "request-model,fallback-model" {
 		t.Fatalf("models=%q, want request-model,fallback-model", got)
 	}
@@ -208,15 +305,19 @@ func TestInferSelectsRequestModelOrFallback(t *testing.T) {
 
 func TestInferRejectsBlankResolvedModel(t *testing.T) {
 	var called bool
-	server := NewServer("", modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
-		called = true
-		return modelOutput(`{"decision":"allow"}`), nil
-	}))
+	server := NewServer(
+		"",
+		modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+			called = true
+			return modelOutput(`{"decision":"allow"}`), nil
+		}),
+	)
 
 	_, err := server.Infer(context.Background(), validRequest(decisionSchema))
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("code=%s, want failed precondition", status.Code(err))
 	}
+
 	if called {
 		t.Fatal("model client called with blank model")
 	}
@@ -224,25 +325,29 @@ func TestInferRejectsBlankResolvedModel(t *testing.T) {
 
 func TestInferPassesPromptInputContextAndSchema(t *testing.T) {
 	var captured ModelRequest
-	server := NewServer("fallback-model", modelFunc(func(_ context.Context, call ModelRequest) (ModelResult, error) {
-		captured = call
-		return ModelResult{
-			Output:                  `{"decision":"allow"}`,
-			RequestID:               "chatcmpl-42",
-			UpstreamResponseID:      "backend-completion-42",
-			ActualModel:             "gpt-5.4-mini-2026-07-01",
-			BackendFingerprint:      "fp_backend",
-			BackendVersion:          "backend-2026.07",
-			PromptTokens:            101,
-			PromptTokensPresent:     true,
-			CompletionTokens:        9,
-			CompletionTokensPresent: true,
-			TotalTokens:             110,
-			TotalTokensPresent:      true,
-			FinishReason:            "stop",
-			Latency:                 1250 * time.Millisecond,
-		}, nil
-	}))
+	server := NewServer(
+		"fallback-model",
+		modelFunc(func(_ context.Context, call ModelRequest) (ModelResult, error) {
+			captured = call
+
+			return ModelResult{
+				Output:                  `{"decision":"allow"}`,
+				RequestID:               "chatcmpl-42",
+				UpstreamResponseID:      "backend-completion-42",
+				ActualModel:             "gpt-5.4-mini-2026-07-01",
+				BackendFingerprint:      "fp_backend",
+				BackendVersion:          "backend-2026.07",
+				PromptTokens:            101,
+				PromptTokensPresent:     true,
+				CompletionTokens:        9,
+				CompletionTokensPresent: true,
+				TotalTokens:             110,
+				TotalTokensPresent:      true,
+				FinishReason:            "stop",
+				Latency:                 1250 * time.Millisecond,
+			}, nil
+		}),
+	)
 	request := validRequest(decisionSchema)
 	request.Context = `{"opaque":{"value":42}}`
 	request.Model = "gpt-5.4-mini"
@@ -256,84 +361,126 @@ func TestInferPassesPromptInputContextAndSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Infer returned error: %v", err)
 	}
-	if captured.Prompt != request.Prompt || captured.Input != request.Input || captured.Context != request.Context {
+
+	if captured.Prompt != request.Prompt || captured.Input != request.Input ||
+		captured.Context != request.Context {
 		t.Fatalf("captured call does not preserve prompt, input, and context")
 	}
+
 	if captured.OutputSchema != request.OutputSchema {
 		t.Fatal("captured schema differs from request schema")
 	}
-	if captured.GenerationOptions.ReasoningEffort != "high" || captured.GenerationOptions.MaxCompletionTokens == nil || *captured.GenerationOptions.MaxCompletionTokens != 2048 {
+
+	if captured.GenerationOptions.ReasoningEffort != "high" ||
+		captured.GenerationOptions.MaxCompletionTokens == nil ||
+		*captured.GenerationOptions.MaxCompletionTokens != 2048 {
 		t.Fatalf("captured generation options=%#v", captured.GenerationOptions)
 	}
-	if captured.GenerationOptions.Temperature == nil || *captured.GenerationOptions.Temperature != 0 {
+
+	if captured.GenerationOptions.Temperature == nil ||
+		*captured.GenerationOptions.Temperature != 0 {
 		t.Fatalf("captured temperature=%#v", captured.GenerationOptions.Temperature)
 	}
+
 	metadata := reply.GetMetadata()
-	if metadata.GetRequestId() != "chatcmpl-42" || metadata.GetRequestedModel() != "gpt-5.4-mini" || metadata.GetActualModel() != "gpt-5.4-mini-2026-07-01" {
+	if metadata.GetRequestId() != "chatcmpl-42" || metadata.GetRequestedModel() != "gpt-5.4-mini" ||
+		metadata.GetActualModel() != "gpt-5.4-mini-2026-07-01" {
 		t.Fatalf("model metadata=%#v", metadata)
 	}
-	if got := metadataStringField(t, metadata, "upstream_response_id"); got != "backend-completion-42" {
+
+	if got := metadataStringField(
+		t,
+		metadata,
+		"upstream_response_id",
+	); got != "backend-completion-42" {
 		t.Fatalf("upstream_response_id=%q, want backend-completion-42", got)
 	}
-	if got := metadataStringField(t, metadata, "raw_output_sha256"); got != sha256Text(`{"decision":"allow"}`) {
+
+	if got := metadataStringField(t, metadata, "raw_output_sha256"); got != sha256Text(
+		`{"decision":"allow"}`,
+	) {
 		t.Fatalf("raw_output_sha256=%q", got)
 	}
+
 	if metadataBoolField(t, metadata, "output_normalized") {
 		t.Fatal("output_normalized=true for schema-valid backend output")
 	}
+
 	if got := metadataStringField(t, metadata, "normalization_kind"); got != "" {
 		t.Fatalf("normalization_kind=%q, want empty", got)
 	}
-	if metadata.GetBackendFingerprint() != "fp_backend" || metadata.GetBackendVersion() != "backend-2026.07" {
+
+	if metadata.GetBackendFingerprint() != "fp_backend" ||
+		metadata.GetBackendVersion() != "backend-2026.07" {
 		t.Fatalf("backend metadata=%#v", metadata)
 	}
+
 	if metadata.GetServiceVersion() == "" {
 		t.Fatal("service version is empty")
 	}
-	if metadata.GetPromptSha256() != sha256Text(request.Prompt) || metadata.GetSchemaSha256() != sha256Text(request.OutputSchema) {
+
+	if metadata.GetPromptSha256() != sha256Text(request.Prompt) ||
+		metadata.GetSchemaSha256() != sha256Text(request.OutputSchema) {
 		t.Fatalf("hash metadata=%#v", metadata)
 	}
-	if metadata.GetPromptTokens() != 101 || metadata.GetCompletionTokens() != 9 || metadata.GetTotalTokens() != 110 || metadata.GetFinishReason() != "stop" || metadata.GetLatencyMs() != 1250 {
+
+	if metadata.GetPromptTokens() != 101 || metadata.GetCompletionTokens() != 9 ||
+		metadata.GetTotalTokens() != 110 ||
+		metadata.GetFinishReason() != "stop" ||
+		metadata.GetLatencyMs() != 1250 {
 		t.Fatalf("completion metadata=%#v", metadata)
 	}
-	if metadata.PromptTokens == nil || metadata.CompletionTokens == nil || metadata.TotalTokens == nil {
+
+	if metadata.PromptTokens == nil || metadata.CompletionTokens == nil ||
+		metadata.TotalTokens == nil {
 		t.Fatalf("usage presence metadata=%#v", metadata)
 	}
 }
 
 func TestInferRecordsBareEnumNormalizationProvenance(t *testing.T) {
 	const rawOutput = "block"
-	server := NewServer("fallback-model", modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
-		return modelOutput(rawOutput), nil
-	}))
+	server := NewServer(
+		"fallback-model",
+		modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+			return modelOutput(rawOutput), nil
+		}),
+	)
 
 	reply, err := server.Infer(context.Background(), validRequest(decisionSchema))
 	if err != nil {
 		t.Fatalf("Infer returned error: %v", err)
 	}
+
 	metadata := reply.GetMetadata()
 	if !metadataBoolField(t, metadata, "output_normalized") {
 		t.Fatal("output_normalized=false, want true")
 	}
+
 	if got := metadataStringField(t, metadata, "normalization_kind"); got != "bare_enum_object" {
 		t.Fatalf("normalization_kind=%q, want bare_enum_object", got)
 	}
+
 	if got := metadataStringField(t, metadata, "raw_output_sha256"); got != sha256Text(rawOutput) {
 		t.Fatalf("raw_output_sha256=%q, want %q", got, sha256Text(rawOutput))
 	}
 }
 
 func TestInferOmitsTokenUsageWhenBackendOmitsIt(t *testing.T) {
-	server := NewServer("fallback-model", modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
-		return modelOutput(`{"decision":"allow"}`), nil
-	}))
+	server := NewServer(
+		"fallback-model",
+		modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+			return modelOutput(`{"decision":"allow"}`), nil
+		}),
+	)
 
 	reply, err := server.Infer(context.Background(), validRequest(decisionSchema))
 	if err != nil {
 		t.Fatalf("Infer returned error: %v", err)
 	}
+
 	metadata := reply.GetMetadata()
-	if metadata.PromptTokens != nil || metadata.CompletionTokens != nil || metadata.TotalTokens != nil {
+	if metadata.PromptTokens != nil || metadata.CompletionTokens != nil ||
+		metadata.TotalTokens != nil {
 		t.Fatalf("usage metadata=%#v, want absent", metadata)
 	}
 }
@@ -345,39 +492,65 @@ func TestInferMapsCancellationDeadlineAndModelFailure(t *testing.T) {
 		context func() context.Context
 		code    codes.Code
 	}{
-		{name: "canceled", call: func(ctx context.Context, _ ModelRequest) (ModelResult, error) { return ModelResult{}, ctx.Err() }, context: canceledContext, code: codes.Canceled},
-		{name: "deadline", call: func(context.Context, ModelRequest) (ModelResult, error) {
-			return ModelResult{}, context.DeadlineExceeded
-		}, context: context.Background, code: codes.DeadlineExceeded},
-		{name: "model failure", call: func(context.Context, ModelRequest) (ModelResult, error) {
-			return ModelResult{}, errors.New("backend failed")
-		}, context: context.Background, code: codes.Unavailable},
+		{
+			name:    "canceled",
+			call:    func(ctx context.Context, _ ModelRequest) (ModelResult, error) { return ModelResult{}, ctx.Err() },
+			context: canceledContext,
+			code:    codes.Canceled,
+		},
+		{
+			name: "deadline",
+			call: func(context.Context, ModelRequest) (ModelResult, error) {
+				return ModelResult{}, context.DeadlineExceeded
+			},
+			context: context.Background,
+			code:    codes.DeadlineExceeded,
+		},
+		{
+			name: "model failure",
+			call: func(context.Context, ModelRequest) (ModelResult, error) {
+				return ModelResult{}, errors.New("backend failed")
+			},
+			context: context.Background,
+			code:    codes.Unavailable,
+		},
 	}
 	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			server := NewServer("fallback-model", modelFunc(test.call))
-			_, err := server.Infer(test.context(), validRequest(decisionSchema))
-			if status.Code(err) != test.code {
-				t.Fatalf("code=%s, want %s", status.Code(err), test.code)
-			}
-		})
+		t.Run(
+			test.name,
+			func(t *testing.T) {
+				server := NewServer("fallback-model", modelFunc(test.call))
+				_, err := server.Infer(test.context(), validRequest(decisionSchema))
+				if status.Code(err) != test.code {
+					t.Fatalf("code=%s, want %s", status.Code(err), test.code)
+				}
+			},
+		)
 	}
 }
 
 func TestInferConcurrentCallsAreSafe(t *testing.T) {
-	server := NewServer("fallback-model", modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
-		return modelOutput(`{"decision":"allow"}`), nil
-	}))
+	server := NewServer(
+		"fallback-model",
+		modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+			return modelOutput(`{"decision":"allow"}`), nil
+		}),
+	)
 	var waitGroup sync.WaitGroup
+
 	for range 32 {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
-			if _, err := server.Infer(context.Background(), validRequest(decisionSchema)); err != nil {
+			if _, err := server.Infer(
+				context.Background(),
+				validRequest(decisionSchema),
+			); err != nil {
 				t.Errorf("Infer returned error: %v", err)
 			}
 		}()
 	}
+
 	waitGroup.Wait()
 }
 
@@ -387,31 +560,40 @@ func TestServeListenerRemainsAvailableForMultipleCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	serveDone := make(chan error, 1)
-	server := NewServer("fallback-model", modelFunc(func(_ context.Context, request ModelRequest) (ModelResult, error) {
-		if request.GenerationOptions.ReasoningEffort != "high" {
-			return ModelResult{}, errors.New("missing high reasoning effort")
-		}
-		return ModelResult{
-			Output:             `{"decision":"allow"}`,
-			RequestID:          "chatcmpl-rpc",
-			ActualModel:        "gpt-5.4-mini-2026-07-01",
-			TotalTokens:        25,
-			TotalTokensPresent: true,
-			FinishReason:       "stop",
-			Latency:            42 * time.Millisecond,
-		}, nil
-	}))
+	server := NewServer(
+		"fallback-model",
+		modelFunc(func(_ context.Context, request ModelRequest) (ModelResult, error) {
+			if request.GenerationOptions.ReasoningEffort != "high" {
+				return ModelResult{}, errors.New("missing high reasoning effort")
+			}
+
+			return ModelResult{
+				Output:             `{"decision":"allow"}`,
+				RequestID:          "chatcmpl-rpc",
+				ActualModel:        "gpt-5.4-mini-2026-07-01",
+				TotalTokens:        25,
+				TotalTokensPresent: true,
+				FinishReason:       "stop",
+				Latency:            42 * time.Millisecond,
+			}, nil
+		}),
+	)
 	go func() {
 		serveDone <- ServeListener(ctx, listener, server)
 	}()
 
-	connection, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	connection, err := grpc.NewClient(
+		listener.Addr().String(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	if err != nil {
 		cancel()
 		t.Fatalf("dial: %v", err)
 	}
+
 	defer func() {
 		if err := connection.Close(); err != nil {
 			t.Errorf("close client connection: %v", err)
@@ -420,18 +602,23 @@ func TestServeListenerRemainsAvailableForMultipleCalls(t *testing.T) {
 	client := inferencepb.NewInferenceClient(connection)
 	healthClient := healthpb.NewHealthClient(connection)
 	healthCtx, healthCancel := context.WithTimeout(context.Background(), time.Second)
-	healthReply, healthErr := healthClient.Check(healthCtx, &healthpb.HealthCheckRequest{
-		Service: inferencepb.Inference_ServiceDesc.ServiceName,
-	})
+	healthReply, healthErr := healthClient.Check(
+		healthCtx,
+		&healthpb.HealthCheckRequest{
+			Service: inferencepb.Inference_ServiceDesc.ServiceName,
+		},
+	)
 	healthCancel()
 	if healthErr != nil {
 		cancel()
 		t.Fatalf("health Check returned error: %v", healthErr)
 	}
+
 	if healthReply.GetStatus() != healthpb.HealthCheckResponse_SERVING {
 		cancel()
 		t.Fatalf("health status=%s, want SERVING", healthReply.GetStatus())
 	}
+
 	for range 2 {
 		callCtx, callCancel := context.WithTimeout(context.Background(), time.Second)
 		request := validRequest(decisionSchema)
@@ -445,12 +632,19 @@ func TestServeListenerRemainsAvailableForMultipleCalls(t *testing.T) {
 			cancel()
 			t.Fatalf("Infer RPC returned error: %v", callErr)
 		}
+
 		metadata := reply.GetMetadata()
-		if metadata.GetRequestId() != "chatcmpl-rpc" || metadata.GetRequestedModel() != "gpt-5.4-mini" || metadata.GetActualModel() != "gpt-5.4-mini-2026-07-01" || metadata.GetTotalTokens() != 25 || metadata.GetFinishReason() != "stop" || metadata.GetLatencyMs() != 42 {
+		if metadata.GetRequestId() != "chatcmpl-rpc" ||
+			metadata.GetRequestedModel() != "gpt-5.4-mini" ||
+			metadata.GetActualModel() != "gpt-5.4-mini-2026-07-01" ||
+			metadata.GetTotalTokens() != 25 ||
+			metadata.GetFinishReason() != "stop" ||
+			metadata.GetLatencyMs() != 42 {
 			cancel()
 			t.Fatalf("Infer RPC metadata=%#v", metadata)
 		}
 	}
+
 	cancel()
 	select {
 	case err := <-serveDone:
@@ -464,9 +658,12 @@ func TestServeListenerRemainsAvailableForMultipleCalls(t *testing.T) {
 
 func TestInferErrorsDoNotEchoSensitivePayloads(t *testing.T) {
 	const sensitive = "sensitive-canary-value"
-	server := NewServer("fallback-model", modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
-		return ModelResult{}, errors.New(sensitive)
-	}))
+	server := NewServer(
+		"fallback-model",
+		modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+			return ModelResult{}, errors.New(sensitive)
+		}),
+	)
 	request := validRequest(decisionSchema)
 	request.Prompt = sensitive
 	request.Input = sensitive
@@ -479,7 +676,11 @@ func TestInferErrorsDoNotEchoSensitivePayloads(t *testing.T) {
 }
 
 func validRequest(schema string) *inferencepb.InferRequest {
-	return &inferencepb.InferRequest{Prompt: "Classify the input", Input: "sample", OutputSchema: schema}
+	return &inferencepb.InferRequest{
+		Prompt:       "Classify the input",
+		Input:        "sample",
+		OutputSchema: schema,
+	}
 }
 
 func withContext(request *inferencepb.InferRequest, value string) *inferencepb.InferRequest {
@@ -487,7 +688,10 @@ func withContext(request *inferencepb.InferRequest, value string) *inferencepb.I
 	return request
 }
 
-func withOptions(request *inferencepb.InferRequest, options *inferencepb.GenerationOptions) *inferencepb.InferRequest {
+func withOptions(
+	request *inferencepb.InferRequest,
+	options *inferencepb.GenerationOptions,
+) *inferencepb.InferRequest {
 	request.GenerationOptions = options
 	return request
 }
@@ -511,6 +715,7 @@ func metadataStringField(
 	if field == nil {
 		t.Fatalf("metadata field %q is missing", name)
 	}
+
 	return metadata.ProtoReflect().Get(field).String()
 }
 
@@ -524,6 +729,7 @@ func metadataBoolField(
 	if field == nil {
 		t.Fatalf("metadata field %q is missing", name)
 	}
+
 	return metadata.ProtoReflect().Get(field).Bool()
 }
 
@@ -542,6 +748,7 @@ func TestRoutingServerSelectsBackendByModel(t *testing.T) {
 			if call.Model != miniModel {
 				t.Errorf("mini backend saw model %q", call.Model)
 			}
+
 			return modelOutput(`{"decision":"block"}`), nil
 		}),
 		v4Model: modelFunc(func(_ context.Context, call ModelRequest) (ModelResult, error) {
@@ -549,37 +756,54 @@ func TestRoutingServerSelectsBackendByModel(t *testing.T) {
 			if call.Model != v4Model {
 				t.Errorf("v4 backend saw model %q", call.Model)
 			}
+
 			return modelOutput(`{"decision":"allow"}`), nil
 		}),
 	}
 	server := NewRoutingServer("", backends)
 
-	miniReply, err := server.Infer(context.Background(), withModel(validRequest(decisionSchema), miniModel))
+	miniReply, err := server.Infer(
+		context.Background(),
+		withModel(validRequest(decisionSchema), miniModel),
+	)
 	if err != nil {
 		t.Fatalf("mini Infer error: %v", err)
 	}
+
 	if miniReply.GetOutputJson() != `{"decision":"block"}` {
 		t.Fatalf("mini output=%q, want block", miniReply.GetOutputJson())
 	}
-	v4Reply, err := server.Infer(context.Background(), withModel(validRequest(decisionSchema), v4Model))
+
+	v4Reply, err := server.Infer(
+		context.Background(),
+		withModel(validRequest(decisionSchema), v4Model),
+	)
 	if err != nil {
 		t.Fatalf("v4 Infer error: %v", err)
 	}
+
 	if v4Reply.GetOutputJson() != `{"decision":"allow"}` {
 		t.Fatalf("v4 output=%q, want allow", v4Reply.GetOutputJson())
 	}
+
 	if miniCalls.Load() != 1 || v4Calls.Load() != 1 {
 		t.Fatalf("mini calls=%d v4 calls=%d, want 1 each", miniCalls.Load(), v4Calls.Load())
 	}
 }
 
 func TestRoutingServerUnknownModelFailsPrecondition(t *testing.T) {
-	server := NewRoutingServer("", map[string]ModelClient{
-		"known": modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
-			return modelOutput(`{"decision":"allow"}`), nil
-		}),
-	})
-	_, err := server.Infer(context.Background(), withModel(validRequest(decisionSchema), "unknown-model"))
+	server := NewRoutingServer(
+		"",
+		map[string]ModelClient{
+			"known": modelFunc(func(context.Context, ModelRequest) (ModelResult, error) {
+				return modelOutput(`{"decision":"allow"}`), nil
+			}),
+		},
+	)
+	_, err := server.Infer(
+		context.Background(),
+		withModel(validRequest(decisionSchema), "unknown-model"),
+	)
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("code=%s, want FailedPrecondition (err=%v)", status.Code(err), err)
 	}
@@ -596,5 +820,6 @@ func float64Pointer(value float64) *float64 {
 func canceledContext() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
+
 	return ctx
 }

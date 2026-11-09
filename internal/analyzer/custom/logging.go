@@ -68,31 +68,39 @@ func runHandler(fn func(*analysis.Pass) (analyzerResult, error)) func(*analysis.
 
 func runSlogErrorWithoutErr(pass *analysis.Pass) (analyzerResult, error) {
 	for _, file := range pass.Files {
-		ast.Inspect(file, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			if selectorName(call.Fun) != "Error" || selectorReceiver(call.Fun) != "slog" {
-				return true
-			}
-			for _, arg := range call.Args[1:] {
-				if lit, ok := arg.(*ast.BasicLit); ok && lit.Kind == token.STRING {
-					name, err := strconv.Unquote(lit.Value)
-					if err == nil && name == "err" {
-						return true
+		ast.Inspect(
+			file,
+			func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+
+				if selectorName(call.Fun) != "Error" || selectorReceiver(call.Fun) != "slog" {
+					return true
+				}
+
+				for _, arg := range call.Args[1:] {
+					if lit, ok := arg.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+						name, err := strconv.Unquote(lit.Value)
+						if err == nil && name == "err" {
+							return true
+						}
 					}
 				}
-			}
-			pass.Report(analysis.Diagnostic{
-				Pos:      call.Pos(),
-				End:      call.End(),
-				Category: slogErrorWithoutErrName,
-				Message:  "slog.Error call has no \"err\" field",
-			})
-			return true
-		})
+
+				pass.Report(analysis.Diagnostic{
+					Pos:      call.Pos(),
+					End:      call.End(),
+					Category: slogErrorWithoutErrName,
+					Message:  "slog.Error call has no \"err\" field",
+				})
+
+				return true
+			},
+		)
 	}
+
 	return analyzerResult{}, nil
 }
 
@@ -111,39 +119,52 @@ func runBannedDirectOutput(pass *analysis.Pass) (analyzerResult, error) {
 		"log.Panicf":  true,
 		"log.Panicln": true,
 	}
+
 	for _, file := range pass.Files {
-		ast.Inspect(file, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
+		ast.Inspect(
+			file,
+			func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+
+				if !banned[callName(call.Fun)] {
+					return true
+				}
+
+				pass.Report(analysis.Diagnostic{
+					Pos:      call.Pos(),
+					End:      call.End(),
+					Category: bannedDirectOutputName,
+					Message:  "direct fmt/log output bypasses structured logging",
+				})
+
 				return true
-			}
-			if !banned[callName(call.Fun)] {
-				return true
-			}
-			pass.Report(analysis.Diagnostic{
-				Pos:      call.Pos(),
-				End:      call.End(),
-				Category: bannedDirectOutputName,
-				Message:  "direct fmt/log output bypasses structured logging",
-			})
-			return true
-		})
+			},
+		)
 	}
+
 	return analyzerResult{}, nil
 }
 
 func runHotLoopInfoLog(pass *analysis.Pass) (analyzerResult, error) {
 	for _, file := range pass.Files {
-		ast.Inspect(file, func(node ast.Node) bool {
-			switch loop := node.(type) {
-			case *ast.ForStmt:
-				checkLoopForInfoLogs(pass, loop.Body)
-			case *ast.RangeStmt:
-				checkLoopForInfoLogs(pass, loop.Body)
-			}
-			return true
-		})
+		ast.Inspect(
+			file,
+			func(node ast.Node) bool {
+				switch loop := node.(type) {
+				case *ast.ForStmt:
+					checkLoopForInfoLogs(pass, loop.Body)
+				case *ast.RangeStmt:
+					checkLoopForInfoLogs(pass, loop.Body)
+				}
+
+				return true
+			},
+		)
 	}
+
 	return analyzerResult{}, nil
 }
 
@@ -154,9 +175,11 @@ func runMissingBoundaryLog(pass *analysis.Pass) (analyzerResult, error) {
 			if !ok || fn.Body == nil || fn.Name == nil || !fn.Name.IsExported() {
 				continue
 			}
+
 			if !returnsError(fn) || !containsSideEffect(fn.Body) || containsStructuredLog(fn.Body) {
 				continue
 			}
+
 			pass.Report(analysis.Diagnostic{
 				Pos:      fn.Pos(),
 				End:      fn.End(),
@@ -165,6 +188,7 @@ func runMissingBoundaryLog(pass *analysis.Pass) (analyzerResult, error) {
 			})
 		}
 	}
+
 	return analyzerResult{}, nil
 }
 
@@ -172,26 +196,34 @@ func checkLoopForInfoLogs(pass *analysis.Pass, body *ast.BlockStmt) {
 	if body == nil {
 		return
 	}
-	ast.Inspect(body, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok {
+
+	ast.Inspect(
+		body,
+		func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+
+			if selectorName(call.Fun) != "Info" {
+				return true
+			}
+
+			recv := selectorReceiver(call.Fun)
+			if recv != "slog" && recv != "log" {
+				return true
+			}
+
+			pass.Report(analysis.Diagnostic{
+				Pos:      call.Pos(),
+				End:      call.End(),
+				Category: hotLoopInfoLogName,
+				Message:  "info-level logging inside a loop may create excessive log volume",
+			})
+
 			return true
-		}
-		if selectorName(call.Fun) != "Info" {
-			return true
-		}
-		recv := selectorReceiver(call.Fun)
-		if recv != "slog" && recv != "log" {
-			return true
-		}
-		pass.Report(analysis.Diagnostic{
-			Pos:      call.Pos(),
-			End:      call.End(),
-			Category: hotLoopInfoLogName,
-			Message:  "info-level logging inside a loop may create excessive log volume",
-		})
-		return true
-	})
+		},
+	)
 }
 
 func selectorName(expr ast.Expr) string {
@@ -199,30 +231,35 @@ func selectorName(expr ast.Expr) string {
 	if !ok {
 		return ""
 	}
+
 	return sel.Sel.Name
 }
 
 func selectorReceiver(expr ast.Expr) string {
-	sel, ok := expr.(*ast.SelectorExpr)
-	if !ok {
+	sel, receiverFound := expr.(*ast.SelectorExpr)
+	if !receiverFound {
 		return ""
 	}
-	ident, ok := sel.X.(*ast.Ident)
-	if !ok {
+
+	ident, receiverFound := sel.X.(*ast.Ident)
+	if !receiverFound {
 		return ""
 	}
+
 	return ident.Name
 }
 
 func callName(expr ast.Expr) string {
-	sel, ok := expr.(*ast.SelectorExpr)
-	if !ok {
+	sel, callFound := expr.(*ast.SelectorExpr)
+	if !callFound {
 		return ""
 	}
-	ident, ok := sel.X.(*ast.Ident)
-	if !ok {
+
+	ident, callFound := sel.X.(*ast.Ident)
+	if !callFound {
 		return ""
 	}
+
 	return ident.Name + "." + sel.Sel.Name
 }
 
@@ -230,59 +267,83 @@ func returnsError(fn *ast.FuncDecl) bool {
 	if fn.Type.Results == nil {
 		return false
 	}
+
 	for _, result := range fn.Type.Results.List {
 		ident, ok := result.Type.(*ast.Ident)
 		if ok && ident.Name == "error" {
 			return true
 		}
 	}
+
 	return false
 }
 
 func containsSideEffect(body *ast.BlockStmt) bool {
 	found := false
-	ast.Inspect(body, func(node ast.Node) bool {
-		if found {
-			return false
-		}
-		call, ok := node.(*ast.CallExpr)
-		if !ok {
+	ast.Inspect(
+		body,
+		func(node ast.Node) bool {
+			if found {
+				return false
+			}
+
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+
+			name := callName(call.Fun)
+			if name == "" {
+				return true
+			}
+
+			if name == "os.WriteFile" || name == "os.Remove" || name == "exec.Command" ||
+				name == "http.Get" ||
+				name == "http.Post" {
+				found = true
+				return false
+			}
+
+			if selector := selectorName(
+				call.Fun,
+			); selector == "Exec" || selector == "Query" || selector == "Do" || selector == "Open" ||
+				selector == "Create" {
+				found = true
+				return false
+			}
+
 			return true
-		}
-		name := callName(call.Fun)
-		if name == "" {
-			return true
-		}
-		if name == "os.WriteFile" || name == "os.Remove" || name == "exec.Command" || name == "http.Get" || name == "http.Post" {
-			found = true
-			return false
-		}
-		if selector := selectorName(call.Fun); selector == "Exec" || selector == "Query" || selector == "Do" || selector == "Open" || selector == "Create" {
-			found = true
-			return false
-		}
-		return true
-	})
+		},
+	)
+
 	return found
 }
 
 func containsStructuredLog(body *ast.BlockStmt) bool {
 	found := false
-	ast.Inspect(body, func(node ast.Node) bool {
-		if found {
-			return false
-		}
-		call, ok := node.(*ast.CallExpr)
-		if !ok {
+	ast.Inspect(
+		body,
+		func(node ast.Node) bool {
+			if found {
+				return false
+			}
+
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+
+			selector := selectorName(call.Fun)
+			recv := selectorReceiver(call.Fun)
+			if recv == "slog" &&
+				(selector == "Info" || selector == "Warn" || selector == "Error" || selector == "Debug") {
+				found = true
+				return false
+			}
+
 			return true
-		}
-		selector := selectorName(call.Fun)
-		recv := selectorReceiver(call.Fun)
-		if recv == "slog" && (selector == "Info" || selector == "Warn" || selector == "Error" || selector == "Debug") {
-			found = true
-			return false
-		}
-		return true
-	})
+		},
+	)
+
 	return found
 }

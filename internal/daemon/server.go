@@ -5,9 +5,6 @@ package daemon
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -33,13 +30,6 @@ import (
 	"goodkind.io/lm-review/internal/tokenutil"
 	"goodkind.io/lm-review/internal/xdg"
 )
-
-// Server implements the LMReviewD gRPC service.
-type Server struct {
-	reviewpb.UnimplementedLMReviewDServer
-	log *audit.Logger
-	cfg *config.Config
-}
 
 // Run starts the daemon on the XDG runtime Unix socket.
 func Run() error {
@@ -68,6 +58,7 @@ func Run() error {
 		slog.Error("daemon.run.open_audit_failed", "err", err)
 		return fmt.Errorf("open audit log: %w", err)
 	}
+
 	defer func() {
 		if err := log.Close(); err != nil {
 			slog.Warn("daemon.run.close_audit_failed", "err", err)
@@ -86,26 +77,38 @@ func Run() error {
 
 	slog.Info("daemon.run.ready", "socket_path", socketPath)
 	fmt.Fprintf(os.Stderr, "lm-review daemon listening on %s\n", socketPath)
+
 	return grpcServer.Serve(listener)
 }
 
 // Review runs a path-based LLM review.
-func (s *Server) Review(ctx context.Context, req *reviewpb.ReviewRequest) (*reviewpb.ReviewResponse, error) {
+func (s *Server) Review(
+	ctx context.Context,
+	req *reviewpb.ReviewRequest,
+) (*reviewpb.ReviewResponse, error) {
 	return s.runReview(ctx, req)
 }
 
 // ReviewStatic runs deterministic static analysis with optional LLM synthesis.
-func (s *Server) ReviewStatic(ctx context.Context, req *reviewpb.StaticReviewRequest) (*reviewpb.ReviewResponse, error) {
+func (s *Server) ReviewStatic(
+	ctx context.Context,
+	req *reviewpb.StaticReviewRequest,
+) (*reviewpb.ReviewResponse, error) {
 	return s.runStaticReview(ctx, req)
 }
 
 // buildClient constructs the appropriate ChatClient and resolves the model name.
-func (s *Server) buildClient(scope string, depth string, modelOverride string) (review.ChatClient, string) {
+func (s *Server) buildClient(
+	scope string,
+	depth string,
+	modelOverride string,
+) (review.ChatClient, string) {
 	if s.cfg.ResolveProvider() == "claude" {
 		model := s.cfg.Claude.Model
 		if modelOverride != "" {
 			model = modelOverride
 		}
+
 		return claude.New(model), model
 	}
 
@@ -124,9 +127,47 @@ func (s *Server) buildClient(scope string, depth string, modelOverride string) (
 	), model
 }
 
+func logReviewChatConfiguration(
+	ctx context.Context,
+	log *slog.Logger,
+	cfg *config.Config,
+	reviewID string,
+	model string,
+	chunkPlan reviewChunkPlan,
+) {
+	log.InfoContext(
+		ctx,
+		"review.chat.configured",
+		"review_id",
+		reviewID,
+		"provider",
+		cfg.ResolveProvider(),
+		"model",
+		model,
+		"context_length",
+		chunkPlan.contextLength,
+		"prompt_overhead_tokens",
+		chunkPlan.promptOverheadTokens,
+		"chunk_token_budget",
+		chunkPlan.chunkTokenBudget,
+		"chunk_parallelism",
+		cfg.OpenAICompat.ResolveChunkParallelism(),
+		"request_timeout_ms",
+		cfg.OpenAICompat.ResolveRequestTimeout().Milliseconds(),
+		"max_response_tokens",
+		cfg.OpenAICompat.ResolveMaxResponseTokens(),
+	)
+}
+
 func (s *Server) maybePreflightLMD(ctx context.Context, model string) error {
 	if !s.cfg.OpenAICompat.LMDPreflight.IsEnabled() {
-		gklog.LoggerFromContext(ctx).DebugContext(ctx, "review.preflight.skipped", "reason", "disabled")
+		gklog.LoggerFromContext(ctx).DebugContext(
+			ctx,
+			"review.preflight.skipped",
+			"reason",
+			"disabled",
+		)
+
 		return nil
 	}
 
@@ -136,50 +177,75 @@ func (s *Server) maybePreflightLMD(ctx context.Context, model string) error {
 		EstimateOnly:   true,
 		EchoLoadConfig: true,
 	}
-	response, err := lmstudio.PreflightLoad(ctx, s.cfg.OpenAICompat.URL, s.cfg.OpenAICompat.Token, request)
+	response, err := lmstudio.PreflightLoad(
+		ctx,
+		s.cfg.OpenAICompat.URL,
+		s.cfg.OpenAICompat.Token,
+		request,
+	)
 	if err != nil {
-		gklog.LoggerFromContext(ctx).ErrorContext(ctx, "review.preflight.estimate_failed", "model", model, "err", err)
+		gklog.LoggerFromContext(ctx).ErrorContext(
+			ctx,
+			"review.preflight.estimate_failed",
+			"model",
+			model,
+			"err",
+			err,
+		)
+
 		return errors.New("estimate model load failed: " + err.Error())
 	}
-	gklog.LoggerFromContext(ctx).InfoContext(ctx, "review.preflight.estimated",
-		"model", model,
-		"context_length", request.ContextLength,
-		"status", response.Status,
-		"can_load", response.CanLoad,
-		"estimated_total_memory_gb", response.EstimatedTotalMemoryGB)
+
+	gklog.LoggerFromContext(ctx).InfoContext(
+		ctx,
+		"review.preflight.estimated",
+		"model",
+		model,
+		"context_length",
+		request.ContextLength,
+		"status",
+		response.Status,
+		"can_load",
+		response.CanLoad,
+		"estimated_total_memory_gb",
+		response.EstimatedTotalMemoryGB,
+	)
 	if response.CanLoad != nil && !*response.CanLoad {
 		return fmt.Errorf("model cannot load within current LMD budget")
 	}
+
 	if s.cfg.OpenAICompat.LMDPreflight.ShouldPreload() {
 		request.EstimateOnly = false
-		if _, err := lmstudio.PreflightLoad(ctx, s.cfg.OpenAICompat.URL, s.cfg.OpenAICompat.Token, request); err != nil {
-			gklog.LoggerFromContext(ctx).ErrorContext(ctx, "review.preflight.load_failed", "model", model, "err", err)
+		if _, err := lmstudio.PreflightLoad(
+			ctx,
+			s.cfg.OpenAICompat.URL,
+			s.cfg.OpenAICompat.Token,
+			request,
+		); err != nil {
+			gklog.LoggerFromContext(ctx).ErrorContext(
+				ctx,
+				"review.preflight.load_failed",
+				"model",
+				model,
+				"err",
+				err,
+			)
+
 			return errors.New("preload model failed: " + err.Error())
 		}
+
 		gklog.LoggerFromContext(ctx).InfoContext(ctx, "review.preflight.loaded", "model", model)
 	}
+
 	return nil
 }
 
-type preparedReviewInput struct {
-	scope           string
-	input           string
-	fullPrompt      review.UserPromptBuilder
-	chunkPrompt     review.ChunkPromptBuilder
-	inputSplitter   review.InputSplitter
-	selectedFiles   []string
-	selectedModeLog string
-}
-
-type reviewChunkPlan struct {
-	chunkBytes           int
-	chunkTokenBudget     int
-	promptOverheadTokens int
-	estimatedInputTokens int
-	contextLength        int
-}
-
-func buildReviewChunkPlan(cfg config.OpenAICompat, prepared *preparedReviewInput, rules []string, buildPrompt review.PromptBuilder) reviewChunkPlan {
+func buildReviewChunkPlan(
+	cfg config.OpenAICompat,
+	prepared *preparedReviewInput,
+	rules []string,
+	buildPrompt review.PromptBuilder,
+) reviewChunkPlan {
 	systemPrompt := buildPrompt(rules)
 	fullPrompt := prepared.fullPrompt("")
 	chunkPrompt := prepared.chunkPrompt("", 1, 1)
@@ -196,6 +262,7 @@ func buildReviewChunkPlan(cfg config.OpenAICompat, prepared *preparedReviewInput
 	if tokenBoundBytes > 0 && tokenBoundBytes < chunkBytes {
 		chunkBytes = tokenBoundBytes
 	}
+
 	chunkBytes = max(chunkBytes, 1024)
 
 	return reviewChunkPlan{
@@ -207,7 +274,10 @@ func buildReviewChunkPlan(cfg config.OpenAICompat, prepared *preparedReviewInput
 	}
 }
 
-func (s *Server) runReview(ctx context.Context, req *reviewpb.ReviewRequest) (*reviewpb.ReviewResponse, error) {
+func (s *Server) runReview(
+	ctx context.Context,
+	req *reviewpb.ReviewRequest,
+) (*reviewpb.ReviewResponse, error) {
 	start := clock.Now()
 	reviewID := newReviewID()
 	log := gklog.LoggerFromContext(ctx).With("component", "lm-review", "subcomponent", "daemon")
@@ -238,117 +308,164 @@ func (s *Server) runReview(ctx context.Context, req *reviewpb.ReviewRequest) (*r
 	rules := filteredRules(cfg, prepared.selectedFiles)
 	buildPrompt := promptBuilderForDepth(depth)
 	chunkPlan := buildReviewChunkPlan(s.cfg.OpenAICompat, prepared, rules, buildPrompt)
-	ctx = requestmeta.With(ctx, requestmeta.Metadata{
-		ReviewID:   reviewID,
-		Scope:      prepared.scope,
-		Mode:       prepared.selectedModeLog,
-		Depth:      depth,
-		ChunkIndex: 0,
-		ChunkTotal: 0,
-	})
+	ctx = requestmeta.With(
+		ctx,
+		requestmeta.Metadata{
+			ReviewID:   reviewID,
+			Scope:      prepared.scope,
+			Mode:       prepared.selectedModeLog,
+			Depth:      depth,
+			ChunkIndex: 0,
+			ChunkTotal: 0,
+		},
+	)
 	s.logPreparedInput(ctx, req.GetPath(), depth, chunkPlan, prepared)
 
 	client, model := s.buildClient(prepared.scope, depth, req.GetModel())
-	log.InfoContext(ctx, "review.chat.configured",
-		"review_id", reviewID,
-		"provider", s.cfg.ResolveProvider(),
-		"model", model,
-		"context_length", chunkPlan.contextLength,
-		"prompt_overhead_tokens", chunkPlan.promptOverheadTokens,
-		"chunk_token_budget", chunkPlan.chunkTokenBudget,
-		"chunk_parallelism", s.cfg.OpenAICompat.ResolveChunkParallelism(),
-		"request_timeout_ms", s.cfg.OpenAICompat.ResolveRequestTimeout().Milliseconds(),
-		"max_response_tokens", s.cfg.OpenAICompat.ResolveMaxResponseTokens())
+	logReviewChatConfiguration(ctx, log, s.cfg, reviewID, model, chunkPlan)
 
 	if err := s.maybePreflightLMD(ctx, model); err != nil {
 		log.ErrorContext(ctx, "review.preflight.failed", "review_id", reviewID, "err", err)
 		return nil, fmt.Errorf("LMD preflight failed: %w", err)
 	}
 
-	result, err := executeReview(ctx, client, prepared, rules, buildPrompt, chunkPlan.chunkBytes, s.cfg.OpenAICompat.ResolveChunkParallelism())
+	result, err := executeReview(
+		ctx,
+		client,
+		prepared,
+		rules,
+		buildPrompt,
+		chunkPlan.chunkBytes,
+		s.cfg.OpenAICompat.ResolveChunkParallelism(),
+	)
 	model = s.verifyUltra(ctx, depth, model, result, prepared)
 
 	latency := clock.Since(start).Milliseconds()
 	if err != nil {
 		s.logReviewFailure(prepared, model, latency, err)
-		log.ErrorContext(ctx, "review.run.failed", "review_id", reviewID, "latency_ms", latency, "err", err)
+		log.ErrorContext(
+			ctx,
+			"review.run.failed",
+			"review_id",
+			reviewID,
+			"latency_ms",
+			latency,
+			"err",
+			err,
+		)
+
 		return nil, fmt.Errorf("review failed: %w", err)
 	}
 
 	s.logReviewSuccess(prepared, model, latency, result)
-	log.InfoContext(ctx, "review.run.finished",
-		"review_id", reviewID,
-		"latency_ms", latency,
-		"verdict", result.Verdict,
-		"issue_count", len(result.Issues))
+	log.InfoContext(
+		ctx,
+		"review.run.finished",
+		"review_id",
+		reviewID,
+		"latency_ms",
+		latency,
+		"verdict",
+		result.Verdict,
+		"issue_count",
+		len(result.Issues),
+	)
+
 	return reviewResponseFromResult(result, model, latency), nil
 }
 
-func (s *Server) logPreparedInput(ctx context.Context, repoPath string, depth string, plan reviewChunkPlan, prepared *preparedReviewInput) {
+func (s *Server) logPreparedInput(
+	ctx context.Context,
+	repoPath string,
+	depth string,
+	plan reviewChunkPlan,
+	prepared *preparedReviewInput,
+) {
 	chunks := prepared.inputSplitter(prepared.input, plan.chunkBytes)
 	log := gklog.LoggerFromContext(ctx).With("component", "lm-review", "subcomponent", "daemon")
-	log.InfoContext(ctx, "review.input.loaded",
-		"review_id", requestmeta.From(ctx).ReviewID,
-		"scope", prepared.scope,
-		"mode", prepared.selectedModeLog,
-		"path", repoPath,
-		"depth", depth,
-		"input_bytes", len(prepared.input),
-		"estimated_input_tokens", plan.estimatedInputTokens,
-		"file_count", len(prepared.selectedFiles),
-		"context_length", plan.contextLength,
-		"prompt_overhead_tokens", plan.promptOverheadTokens,
-		"chunk_token_budget", plan.chunkTokenBudget,
-		"chunk_bytes", plan.chunkBytes,
-		"chunk_count", len(chunks))
+	log.InfoContext(
+		ctx,
+		"review.input.loaded",
+		"review_id",
+		requestmeta.From(ctx).ReviewID,
+		"scope",
+		prepared.scope,
+		"mode",
+		prepared.selectedModeLog,
+		"path",
+		repoPath,
+		"depth",
+		depth,
+		"input_bytes",
+		len(prepared.input),
+		"estimated_input_tokens",
+		plan.estimatedInputTokens,
+		"file_count",
+		len(prepared.selectedFiles),
+		"context_length",
+		plan.contextLength,
+		"prompt_overhead_tokens",
+		plan.promptOverheadTokens,
+		"chunk_token_budget",
+		plan.chunkTokenBudget,
+		"chunk_bytes",
+		plan.chunkBytes,
+		"chunk_count",
+		len(chunks),
+	)
 }
 
-func (s *Server) logStaticChatConfig(ctx context.Context, log *slog.Logger, reviewID string, model string) {
-	log.InfoContext(ctx, "review.static.chat.configured",
-		"review_id", reviewID,
-		"provider", s.cfg.ResolveProvider(),
-		"model", model,
-		"request_timeout_ms", s.cfg.OpenAICompat.ResolveRequestTimeout().Milliseconds(),
-		"max_response_tokens", s.cfg.OpenAICompat.ResolveMaxResponseTokens())
-}
-
-func newReviewID() string {
-	var raw [8]byte
-	if _, err := rand.Read(raw[:]); err == nil {
-		return "lmrev-" + hex.EncodeToString(raw[:])
-	}
-	return fmt.Sprintf("lmrev-%d", clock.Now().UnixNano())
+func (s *Server) logStaticChatConfig(
+	ctx context.Context,
+	log *slog.Logger,
+	reviewID string,
+	model string,
+) {
+	log.InfoContext(
+		ctx,
+		"review.static.chat.configured",
+		"review_id",
+		reviewID,
+		"provider",
+		s.cfg.ResolveProvider(),
+		"model",
+		model,
+		"request_timeout_ms",
+		s.cfg.OpenAICompat.ResolveRequestTimeout().Milliseconds(),
+		"max_response_tokens",
+		s.cfg.OpenAICompat.ResolveMaxResponseTokens(),
+	)
 }
 
 func (s *Server) reviewConfig(repoPath string, scope string) *config.Config {
 	if repoPath == "" {
 		return s.cfg
 	}
+
 	cfg, err := config.MergeProjectRules(s.cfg, repoPath)
 	if err != nil {
-		s.log.Write(audit.Entry{Scope: scope, Error: err.Error()})
+		s.log.Write(audit.Entry{
+			Scope: scope,
+			Error: err.Error(),
+		})
+
 		return s.cfg
 	}
+
 	return cfg
 }
 
 func filteredRules(cfg *config.Config, selectedFiles []string) []string {
 	texts := make([]string, len(cfg.Rules))
+
 	filters := make([]review.RuleFilter, len(cfg.Rules))
 	for i, rule := range cfg.Rules {
 		texts[i] = rule.Text
 		filters[i] = review.RuleFilter{Globs: rule.Globs, Always: rule.Always}
 	}
+
 	return review.FilterRules(texts, filters, selectedFiles)
 }
-
-type reviewDepth string
-
-const (
-	reviewDepthQuick reviewDepth = "quick"
-	reviewDepthDeep  reviewDepth = "deep"
-	reviewDepthUltra reviewDepth = "ultra"
-)
 
 func promptBuilderForDepth(depth string) review.PromptBuilder {
 	switch reviewDepth(depth) {
@@ -361,34 +478,65 @@ func promptBuilderForDepth(depth string) review.PromptBuilder {
 	}
 }
 
-func executeReview(ctx context.Context, client review.ChatClient, prepared *preparedReviewInput, rules []string, buildPrompt review.PromptBuilder, chunkBytes int, parallelism int) (*review.Result, error) {
+func executeReview(
+	ctx context.Context,
+	client review.ChatClient,
+	prepared *preparedReviewInput,
+	rules []string,
+	buildPrompt review.PromptBuilder,
+	chunkBytes int,
+	parallelism int,
+) (*review.Result, error) {
 	log := gklog.LoggerFromContext(ctx).With("component", "lm-review", "subcomponent", "daemon")
 	if len(prepared.input) > chunkBytes {
-		result, err := review.ChunkedReview(ctx, client, prepared.input, prepared.scope, rules, buildPrompt, prepared.fullPrompt, prepared.chunkPrompt, prepared.inputSplitter, chunkBytes, parallelism)
+		result, err := review.ChunkedReview(
+			ctx,
+			client,
+			prepared.input,
+			prepared.scope,
+			rules,
+			buildPrompt,
+			prepared.fullPrompt,
+			prepared.chunkPrompt,
+			prepared.inputSplitter,
+			chunkBytes,
+			parallelism,
+		)
 		if err != nil {
 			log.ErrorContext(ctx, "review.execute.chunked_failed", "err", err)
 			return nil, fmt.Errorf("chunked review: %w", err)
 		}
+
 		return result, nil
 	}
+
 	reviewer := review.NewWithPromptBuilder(client, prepared.scope, rules, buildPrompt)
 	result, err := reviewer.ReviewInput(ctx, prepared.input, prepared.fullPrompt)
 	if err != nil {
 		log.ErrorContext(ctx, "review.execute.input_failed", "err", err)
 		return nil, fmt.Errorf("review input: %w", err)
 	}
+
 	return result, nil
 }
 
-func (s *Server) verifyUltra(ctx context.Context, depth string, model string, result *review.Result, prepared *preparedReviewInput) string {
+func (s *Server) verifyUltra(
+	ctx context.Context,
+	depth string,
+	model string,
+	result *review.Result,
+	prepared *preparedReviewInput,
+) string {
 	if depth != "ultra" || result == nil || len(result.Issues) == 0 {
 		return model
 	}
+
 	verifyClient, verifyModel := s.buildClient(prepared.scope, "ultra", "")
 	verified, err := review.VerifyIssues(ctx, verifyClient, result.Issues, prepared.input)
 	if err != nil {
 		return model
 	}
+
 	beforeCount := len(result.Issues)
 	result.Issues = verified
 	s.log.Write(audit.Entry{
@@ -401,10 +549,16 @@ func (s *Server) verifyUltra(ctx context.Context, depth string, model string, re
 		IssueCount: 0,
 		Error:      fmt.Sprintf("ultra verify: %d->%d issues", beforeCount, len(verified)),
 	})
+
 	return verifyModel
 }
 
-func (s *Server) logReviewFailure(prepared *preparedReviewInput, model string, latency int64, err error) {
+func (s *Server) logReviewFailure(
+	prepared *preparedReviewInput,
+	model string,
+	latency int64,
+	err error,
+) {
 	s.log.Write(audit.Entry{
 		Timestamp:  time.Time{},
 		Scope:      prepared.scope,
@@ -417,7 +571,12 @@ func (s *Server) logReviewFailure(prepared *preparedReviewInput, model string, l
 	})
 }
 
-func (s *Server) logReviewSuccess(prepared *preparedReviewInput, model string, latency int64, result *review.Result) {
+func (s *Server) logReviewSuccess(
+	prepared *preparedReviewInput,
+	model string,
+	latency int64,
+	result *review.Result,
+) {
 	s.log.Write(audit.Entry{
 		Timestamp:  time.Time{},
 		Scope:      prepared.scope,
@@ -430,7 +589,10 @@ func (s *Server) logReviewSuccess(prepared *preparedReviewInput, model string, l
 	})
 }
 
-func (s *Server) prepareReviewInput(ctx context.Context, req *reviewpb.ReviewRequest) (*preparedReviewInput, error) {
+func (s *Server) prepareReviewInput(
+	ctx context.Context,
+	req *reviewpb.ReviewRequest,
+) (*preparedReviewInput, error) {
 	repoRoot := req.GetPath()
 	if repoRoot == "" {
 		return nil, fmt.Errorf("path is required")
@@ -447,17 +609,29 @@ func (s *Server) prepareReviewInput(ctx context.Context, req *reviewpb.ReviewReq
 	case reviewpb.ReviewMode_REVIEW_MODE_AUTO:
 		return prepareAutoInput(ctx, repoRoot, req.GetBaseRef())
 	case reviewpb.ReviewMode_REVIEW_MODE_STAGED_DIFF:
-		return prepareDiffInput(ctx, "staged", func() (string, error) {
-			return gitutil.StagedDiff(repoRoot)
-		})
+		return prepareDiffInput(
+			ctx,
+			"staged",
+			func() (string, error) {
+				return gitutil.StagedDiff(repoRoot)
+			},
+		)
 	case reviewpb.ReviewMode_REVIEW_MODE_WORKTREE_DIFF:
-		return prepareDiffInput(ctx, "worktree", func() (string, error) {
-			return gitutil.WorktreeDiff(repoRoot)
-		})
+		return prepareDiffInput(
+			ctx,
+			"worktree",
+			func() (string, error) {
+				return gitutil.WorktreeDiff(repoRoot)
+			},
+		)
 	case reviewpb.ReviewMode_REVIEW_MODE_PR:
-		return prepareDiffInput(ctx, "pr", func() (string, error) {
-			return gitutil.PRDiff(repoRoot, req.GetBaseRef())
-		})
+		return prepareDiffInput(
+			ctx,
+			"pr",
+			func() (string, error) {
+				return gitutil.PRDiff(repoRoot, req.GetBaseRef())
+			},
+		)
 	case reviewpb.ReviewMode_REVIEW_MODE_REPO:
 		return prepareRepoInput(ctx, repoRoot, "repo")
 	default:
@@ -465,13 +639,18 @@ func (s *Server) prepareReviewInput(ctx context.Context, req *reviewpb.ReviewReq
 	}
 }
 
-func prepareAutoInput(ctx context.Context, repoRoot string, baseRef string) (*preparedReviewInput, error) {
+func prepareAutoInput(
+	ctx context.Context,
+	repoRoot string,
+	baseRef string,
+) (*preparedReviewInput, error) {
 	log := gklog.LoggerFromContext(ctx).With("component", "lm-review", "subcomponent", "daemon")
 	staged, err := gitutil.StagedDiff(repoRoot)
 	if err != nil {
 		log.ErrorContext(ctx, "review.auto.staged_diff_failed", "err", err)
 		return nil, fmt.Errorf("staged diff: %w", err)
 	}
+
 	if strings.TrimSpace(staged) != "" {
 		return newDiffInput(staged, "auto-staged"), nil
 	}
@@ -481,6 +660,7 @@ func prepareAutoInput(ctx context.Context, repoRoot string, baseRef string) (*pr
 		log.ErrorContext(ctx, "review.auto.worktree_diff_failed", "err", err)
 		return nil, fmt.Errorf("worktree diff: %w", err)
 	}
+
 	if strings.TrimSpace(worktree) != "" {
 		return newDiffInput(worktree, "auto-worktree"), nil
 	}
@@ -493,23 +673,33 @@ func prepareAutoInput(ctx context.Context, repoRoot string, baseRef string) (*pr
 	return prepareRepoInput(ctx, repoRoot, "auto-repo")
 }
 
-func prepareDiffInput(ctx context.Context, modeLog string, load func() (string, error)) (*preparedReviewInput, error) {
+func prepareDiffInput(
+	ctx context.Context,
+	modeLog string,
+	load func() (string, error),
+) (*preparedReviewInput, error) {
 	log := gklog.LoggerFromContext(ctx).With("component", "lm-review", "subcomponent", "daemon")
 	diff, err := load()
 	if err != nil {
 		log.ErrorContext(ctx, "review.diff.load_failed", "mode", modeLog, "err", err)
 		return nil, fmt.Errorf("%s diff: %w", modeLog, err)
 	}
+
 	return newDiffInput(diff, modeLog), nil
 }
 
-func prepareRepoInput(ctx context.Context, repoRoot string, modeLog string) (*preparedReviewInput, error) {
+func prepareRepoInput(
+	ctx context.Context,
+	repoRoot string,
+	modeLog string,
+) (*preparedReviewInput, error) {
 	log := gklog.LoggerFromContext(ctx).With("component", "lm-review", "subcomponent", "daemon")
 	snapshot, err := gitutil.RepoSnapshot(repoRoot, 0)
 	if err != nil {
 		log.ErrorContext(ctx, "review.repo.snapshot_failed", "err", err)
 		return nil, fmt.Errorf("repo snapshot: %w", err)
 	}
+
 	return &preparedReviewInput{
 		scope:           "repo",
 		input:           snapshot,
@@ -533,13 +723,17 @@ func newDiffInput(diff string, modeLog string) *preparedReviewInput {
 	}
 }
 
-func (s *Server) runStaticReview(ctx context.Context, req *reviewpb.StaticReviewRequest) (*reviewpb.ReviewResponse, error) {
+func (s *Server) runStaticReview(
+	ctx context.Context,
+	req *reviewpb.StaticReviewRequest,
+) (*reviewpb.ReviewResponse, error) {
 	start := clock.Now()
 	reviewID := newReviewID()
 	log := gklog.LoggerFromContext(ctx).With("component", "lm-review", "subcomponent", "daemon")
 	if peerInfo, ok := peer.FromContext(ctx); ok && peerInfo.Addr != nil {
 		log = log.With("peer_addr", peerInfo.Addr.String())
 	}
+
 	if !s.cfg.StaticReview.IsEnabled() {
 		return &reviewpb.ReviewResponse{
 			Verdict:   string(review.VerdictSkip),
@@ -549,11 +743,15 @@ func (s *Server) runStaticReview(ctx context.Context, req *reviewpb.StaticReview
 	}
 
 	analyzerConfig := s.staticAnalyzerConfig(req)
-	findings, sourceErrs := analyzer.Run(ctx, analyzerConfig, analyzer.RunOptions{
-		RepoRoot:      req.Path,
-		Files:         req.Files,
-		EnabledChecks: analyzerConfig.EnabledChecks,
-	})
+	findings, sourceErrs := analyzer.Run(
+		ctx,
+		analyzerConfig,
+		analyzer.RunOptions{
+			RepoRoot:      req.Path,
+			Files:         req.Files,
+			EnabledChecks: analyzerConfig.EnabledChecks,
+		},
+	)
 	latency := clock.Since(start).Milliseconds()
 
 	if !req.Synthesize {
@@ -566,6 +764,7 @@ func (s *Server) runStaticReview(ctx context.Context, req *reviewpb.StaticReview
 			IssueCount: len(result.Issues),
 			Error:      summarizeErrors(sourceErrs),
 		})
+
 		return reviewResponseFromResult(result, "deterministic", latency), nil
 	}
 
@@ -573,14 +772,18 @@ func (s *Server) runStaticReview(ctx context.Context, req *reviewpb.StaticReview
 	if depth == "" {
 		depth = "normal"
 	}
-	ctx = requestmeta.With(ctx, requestmeta.Metadata{
-		ReviewID:   reviewID,
-		Scope:      "static",
-		Mode:       "static",
-		Depth:      depth,
-		ChunkIndex: 0,
-		ChunkTotal: 0,
-	})
+
+	ctx = requestmeta.With(
+		ctx,
+		requestmeta.Metadata{
+			ReviewID:   reviewID,
+			Scope:      "static",
+			Mode:       "static",
+			Depth:      depth,
+			ChunkIndex: 0,
+			ChunkTotal: 0,
+		},
+	)
 
 	client, model := s.buildClient("repo", depth, req.Model)
 	s.logStaticChatConfig(ctx, log, reviewID, model)
@@ -598,8 +801,11 @@ func (s *Server) runStaticReview(ctx context.Context, req *reviewpb.StaticReview
 			Scope:     "static",
 			Model:     model,
 			LatencyMS: latency,
-			Error:     strings.TrimSpace(strings.TrimSpace(summarizeErrors(sourceErrs)+" ") + err.Error()),
+			Error: strings.TrimSpace(
+				strings.TrimSpace(summarizeErrors(sourceErrs)+" ") + err.Error(),
+			),
 		})
+
 		return nil, fmt.Errorf("static review failed: %w", err)
 	}
 
@@ -612,6 +818,7 @@ func (s *Server) runStaticReview(ctx context.Context, req *reviewpb.StaticReview
 		IssueCount: len(result.Issues),
 		Error:      summarizeErrors(sourceErrs),
 	})
+
 	return reviewResponseFromResult(result, model, latency), nil
 }
 
@@ -623,9 +830,11 @@ func (s *Server) staticAnalyzerConfig(req *reviewpb.StaticReviewRequest) analyze
 	if len(req.DisabledSources) > 0 {
 		analyzerConfig.DisabledSources = append([]string{}, req.DisabledSources...)
 	}
+
 	if len(req.EnabledChecks) > 0 {
 		analyzerConfig.EnabledChecks = append([]string{}, req.EnabledChecks...)
 	}
+
 	return analyzerConfig
 }
 
@@ -634,20 +843,26 @@ func (s *Server) staticRules(req *reviewpb.StaticReviewRequest, snapshot string)
 	if req.Path != "" {
 		mergedCfg, mergeErr := config.MergeProjectRules(s.cfg, req.Path)
 		if mergeErr != nil {
-			s.log.Write(audit.Entry{Scope: "static", Error: mergeErr.Error()})
+			s.log.Write(audit.Entry{
+				Scope: "static",
+				Error: mergeErr.Error(),
+			})
 		} else {
 			cfg = mergedCfg
 		}
 	}
+
 	selectedFiles := req.Files
 	if len(selectedFiles) == 0 {
 		selectedFiles = snapshotFiles(snapshot)
 	}
+
 	return filteredRules(cfg, selectedFiles)
 }
 
 func rawStaticResult(findings []analyzer.Finding, errs []error) *review.Result {
 	issues := make([]review.Issue, 0, len(findings))
+
 	result := &review.Result{
 		Verdict: review.VerdictPass,
 		Summary: fmt.Sprintf("Static review produced %d deterministic findings.", len(findings)),
@@ -676,11 +891,18 @@ func rawStaticResult(findings []analyzer.Finding, errs []error) *review.Result {
 			}
 		}
 	}
+
 	if len(errs) > 0 {
-		result.Summary = fmt.Sprintf("%s %d analyzer source(s) degraded.", result.Summary, len(errs))
+		result.Summary = fmt.Sprintf(
+			"%s %d analyzer source(s) degraded.",
+			result.Summary,
+			len(errs),
+		)
 	}
+
 	result.Issues = issues
 	result.Stats = review.Stats{}
+
 	for _, issue := range issues {
 		switch analyzer.Severity(issue.Severity) {
 		case analyzer.SeverityError:
@@ -691,6 +913,7 @@ func rawStaticResult(findings []analyzer.Finding, errs []error) *review.Result {
 			result.Stats.Infos++
 		}
 	}
+
 	return result
 }
 
@@ -698,6 +921,7 @@ func staticSnapshot(repoRoot string, files []string, maxBytes int) (string, erro
 	if len(files) == 0 {
 		return gitutil.RepoSnapshot(repoRoot, maxBytes)
 	}
+
 	return gitutil.FilesSnapshot(repoRoot, files, maxBytes)
 }
 
@@ -705,14 +929,20 @@ func summarizeErrors(errs []error) string {
 	if len(errs) == 0 {
 		return ""
 	}
+
 	parts := make([]string, 0, len(errs))
 	for _, err := range errs {
 		parts = append(parts, err.Error())
 	}
+
 	return strings.Join(parts, "; ")
 }
 
-func reviewResponseFromResult(result *review.Result, model string, latency int64) *reviewpb.ReviewResponse {
+func reviewResponseFromResult(
+	result *review.Result,
+	model string,
+	latency int64,
+) *reviewpb.ReviewResponse {
 	resp := &reviewpb.ReviewResponse{
 		Verdict:   string(result.Verdict),
 		Summary:   result.Summary,
@@ -720,36 +950,34 @@ func reviewResponseFromResult(result *review.Result, model string, latency int64
 		LatencyMs: latency,
 	}
 	for _, issue := range result.Issues {
-		resp.Issues = append(resp.Issues, &reviewpb.Issue{
-			Severity:   issue.Severity,
-			File:       issue.File,
-			Line:       int32(issue.Line),
-			EndLine:    int32(issue.EndLine),
-			Rule:       issue.Rule,
-			Message:    issue.Message,
-			Category:   string(issue.Category),
-			Suggestion: issue.Suggestion,
-			Confidence: string(issue.Confidence),
-		})
+		resp.Issues = append(
+			resp.Issues,
+			&reviewpb.Issue{
+				Severity:   issue.Severity,
+				File:       issue.File,
+				Line:       int32(issue.Line),
+				EndLine:    int32(issue.EndLine),
+				Rule:       issue.Rule,
+				Message:    issue.Message,
+				Category:   string(issue.Category),
+				Suggestion: issue.Suggestion,
+				Confidence: string(issue.Confidence),
+			},
+		)
 	}
+
 	return resp
 }
 
 func snapshotFiles(snapshot string) []string {
 	lines := strings.Split(snapshot, "\n")
 	files := make([]string, 0)
+
 	for _, line := range lines {
 		if strings.HasPrefix(line, "// FILE: ") {
 			files = append(files, strings.TrimPrefix(line, "// FILE: "))
 		}
 	}
-	return files
-}
 
-func diffHash(diff string) string {
-	if diff == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(diff))
-	return fmt.Sprintf("%x", sum[:8])
+	return files
 }

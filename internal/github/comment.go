@@ -48,9 +48,12 @@ func currentPRNumber() (int, error) {
 func findComment(prNumber int, scope string) (int, error) {
 	marker := markerPrefix + scope + " -->"
 
-	out, err := exec.Command("gh", "api",
+	out, err := exec.Command(
+		"gh",
+		"api",
 		fmt.Sprintf("/repos/{owner}/{repo}/issues/%d/comments", prNumber),
-		"--jq", fmt.Sprintf("[.[] | select(.body | contains(%q)) | .id] | first // 0", marker),
+		"--jq",
+		fmt.Sprintf("[.[] | select(.body | contains(%q)) | .id] | first // 0", marker),
 	).Output()
 	if err != nil {
 		return 0, fmt.Errorf("list comments: %w", err)
@@ -65,10 +68,14 @@ func findComment(prNumber int, scope string) (int, error) {
 }
 
 func updateComment(commentID int, body string) error {
-	out, err := exec.Command("gh", "api",
+	out, err := exec.Command(
+		"gh",
+		"api",
 		fmt.Sprintf("/repos/{owner}/{repo}/issues/comments/%d", commentID),
-		"--method", "PATCH",
-		"--field", "body="+body,
+		"--method",
+		"PATCH",
+		"--field",
+		"body="+body,
 	).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("update comment: %w: %s", err, out)
@@ -78,9 +85,13 @@ func updateComment(commentID int, body string) error {
 }
 
 func createComment(prNumber int, body string) error {
-	out, err := exec.Command("gh", "pr", "comment",
+	out, err := exec.Command(
+		"gh",
+		"pr",
+		"comment",
 		fmt.Sprintf("%d", prNumber),
-		"--body", body,
+		"--body",
+		body,
 	).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("create comment: %w: %s", err, out)

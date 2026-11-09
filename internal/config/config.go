@@ -77,27 +77,36 @@ func (b InferenceBackend) Resolve(global OpenAICompat) (OpenAICompat, error) {
 	if b.BaseURL == "" {
 		return OpenAICompat{}, errors.New("inference backend base_url is required")
 	}
+
 	if len(b.Models) == 0 {
 		return OpenAICompat{}, errors.New("inference backend requires at least one model")
 	}
+
 	if b.Token != "" && b.TokenFile != "" {
-		return OpenAICompat{}, errors.New("inference backend token and token_file are mutually exclusive")
+		return OpenAICompat{}, errors.New(
+			"inference backend token and token_file are mutually exclusive",
+		)
 	}
+
 	backend := global
 	backend.URL = b.BaseURL
 	backend.Token = b.Token
 	if b.TokenFile == "" {
 		return backend, nil
 	}
+
 	tokenPath, err := resolveTokenFilePath(xdg.ConfigPath(), b.TokenFile)
 	if err != nil {
 		return OpenAICompat{}, err
 	}
+
 	token, err := readInferenceTokenFile(tokenPath)
 	if err != nil {
 		return OpenAICompat{}, err
 	}
+
 	backend.Token = token
+
 	return backend, nil
 }
 
@@ -109,27 +118,40 @@ func (i Inference) ResolveBackends(global OpenAICompat) ([]ResolvedInferenceBack
 	if len(i.Backends) == 0 {
 		return nil, nil
 	}
+
 	resolved := make([]ResolvedInferenceBackend, 0, len(i.Backends))
 	seen := make(map[string]struct{})
+
 	for _, backend := range i.Backends {
 		settings, err := backend.Resolve(global)
 		if err != nil {
 			return nil, err
 		}
+
 		for _, model := range backend.Models {
 			if strings.TrimSpace(model) == "" {
 				return nil, errors.New("inference backend model id must not be empty")
 			}
+
 			if _, duplicate := seen[model]; duplicate {
-				return nil, fmt.Errorf("inference backend model %q is configured more than once", model)
+				return nil, fmt.Errorf(
+					"inference backend model %q is configured more than once",
+					model,
+				)
 			}
+
 			seen[model] = struct{}{}
 		}
-		resolved = append(resolved, ResolvedInferenceBackend{
-			Models:  append([]string{}, backend.Models...),
-			Backend: settings,
-		})
+
+		resolved = append(
+			resolved,
+			ResolvedInferenceBackend{
+				Models:  append([]string{}, backend.Models...),
+				Backend: settings,
+			},
+		)
 	}
+
 	return resolved, nil
 }
 
@@ -138,6 +160,7 @@ func (i Inference) ResolveModel() string {
 	if i.Model != "" {
 		return i.Model
 	}
+
 	return DefaultInferenceModel
 }
 
@@ -146,6 +169,7 @@ func (i Inference) ResolveListenAddress() string {
 	if i.ListenAddress != "" {
 		return i.ListenAddress
 	}
+
 	return DefaultInferenceListenAddress
 }
 
@@ -156,9 +180,11 @@ func (i Inference) ResolveBackend(global OpenAICompat) OpenAICompat {
 		backend.URL = i.BaseURL
 		backend.Token = ""
 	}
+
 	if i.Token != "" {
 		backend.Token = i.Token
 	}
+
 	return backend
 }
 
@@ -167,6 +193,7 @@ func (i Inference) ResolveBackendCredential(global OpenAICompat) (OpenAICompat, 
 	if i.Token != "" && i.TokenFile != "" {
 		return OpenAICompat{}, errors.New("inference token and token_file are mutually exclusive")
 	}
+
 	backend := i.ResolveBackend(global)
 	if i.TokenFile == "" {
 		return backend, nil
@@ -176,11 +203,14 @@ func (i Inference) ResolveBackendCredential(global OpenAICompat) (OpenAICompat, 
 	if err != nil {
 		return OpenAICompat{}, err
 	}
+
 	token, err := readInferenceTokenFile(tokenPath)
 	if err != nil {
 		return OpenAICompat{}, err
 	}
+
 	backend.Token = token
+
 	return backend, nil
 }
 
@@ -198,6 +228,7 @@ func (s StaticReview) IsEnabled() bool {
 	if s.Enabled == nil {
 		return true
 	}
+
 	return *s.Enabled
 }
 
@@ -207,6 +238,7 @@ func (s StaticReview) SynthesizeByDefault() bool {
 	if s.Synthesize == nil {
 		return true
 	}
+
 	return *s.Synthesize
 }
 
@@ -220,6 +252,7 @@ func (c Config) ResolveProvider() string {
 	if c.Provider != "" {
 		return c.Provider
 	}
+
 	return "openai_compat"
 }
 
@@ -294,6 +327,7 @@ func (l OpenAICompat) ResolveContextLength() int {
 	if l.ContextLength > 0 {
 		return l.ContextLength
 	}
+
 	return 32768
 }
 
@@ -302,6 +336,7 @@ func (l OpenAICompat) ResolveMaxResponseTokens() int {
 	if l.MaxResponseTokens > 0 {
 		return l.MaxResponseTokens
 	}
+
 	return 8192
 }
 
@@ -310,6 +345,7 @@ func (l OpenAICompat) ResolveChunkParallelism() int {
 	if l.ChunkParallelism > 0 {
 		return l.ChunkParallelism
 	}
+
 	return 1
 }
 
@@ -318,6 +354,7 @@ func (l OpenAICompat) ResolveRequestTimeout() time.Duration {
 	if l.RequestTimeoutSec > 0 {
 		return time.Duration(l.RequestTimeoutSec) * time.Second
 	}
+
 	return 5 * time.Minute
 }
 
@@ -336,33 +373,41 @@ func (l OpenAICompat) ResolveChatSettings() ChatSettings {
 	if l.Temperature != nil {
 		settings.Temperature = *l.Temperature
 	}
+
 	if l.TopP != nil {
 		value := *l.TopP
 		settings.TopP = &value
 	}
+
 	if l.TopK != nil {
 		value := *l.TopK
 		settings.TopK = &value
 	}
+
 	if l.PresencePenalty != nil {
 		value := *l.PresencePenalty
 		settings.PresencePenalty = &value
 	}
+
 	if l.FrequencyPenalty != nil {
 		value := *l.FrequencyPenalty
 		settings.FrequencyPenalty = &value
 	}
+
 	if l.RepeatPenalty != nil {
 		value := *l.RepeatPenalty
 		settings.RepeatPenalty = &value
 	}
+
 	if l.Seed != nil {
 		value := *l.Seed
 		settings.Seed = &value
 	}
+
 	if len(l.Stop) > 0 {
 		settings.Stop = append([]string{}, l.Stop...)
 	}
+
 	return settings
 }
 
@@ -382,6 +427,7 @@ func (l OpenAICompat) ResolveReviewChunkBytes() int {
 	if chunkBytes <= 0 || chunkBytes > maxReviewChunkBytes {
 		return maxReviewChunkBytes
 	}
+
 	return chunkBytes
 }
 
@@ -404,27 +450,33 @@ func (l OpenAICompat) ResolveModel(scope string, depth string) string {
 		if mode.QuickModel != "" {
 			return mode.QuickModel
 		}
+
 		if l.QuickModel != "" {
 			return l.QuickModel
 		}
+
 		return l.FastModel // fall back to fast
 	case "deep":
 		if mode.DeepModel != "" {
 			return mode.DeepModel
 		}
+
 		return l.DeepModel
 	case "ultra":
 		if mode.UltraModel != "" {
 			return mode.UltraModel
 		}
+
 		if l.UltraModel != "" {
 			return l.UltraModel
 		}
+
 		return l.DeepModel // fall back to deep
 	default: // "normal" or ""
 		if mode.Model != "" {
 			return mode.Model
 		}
+
 		return l.FastModel
 	}
 }
@@ -472,12 +524,15 @@ func Load() (*Config, error) {
 	if cfg.OpenAICompat.URL == "" {
 		cfg.OpenAICompat = raw.LMStudio
 	}
+
 	if cfg.OpenAICompat.URL == "" {
 		cfg.OpenAICompat.URL = "http://localhost:5400"
 	}
+
 	if cfg.Provider == "lmstudio" {
 		cfg.Provider = "openai_compat"
 	}
+
 	return &cfg, nil
 }
 
@@ -486,11 +541,19 @@ func readInferenceTokenFile(tokenPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	defer func() {
 		if closeErr := tokenFile.Close(); closeErr != nil {
-			slog.Warn("config.inference_token_file.close_failed", "path", tokenPath, "err", closeErr)
+			slog.Warn(
+				"config.inference_token_file.close_failed",
+				"path",
+				tokenPath,
+				"err",
+				closeErr,
+			)
 		}
 	}()
+
 	return readOpenedInferenceTokenFile(tokenFile, tokenPath)
 }
 
@@ -501,9 +564,12 @@ func openInferenceTokenFile(tokenPath string) (*os.File, error) {
 		if errors.Is(err, unix.ELOOP) {
 			return nil, fmt.Errorf("inference token_file must not be a symlink: %s", tokenPath)
 		}
+
 		slog.Warn("config.inference_token_file.open_failed", "path", tokenPath, "err", err)
+
 		return nil, fmt.Errorf("read inference token_file %s: %w", tokenPath, err)
 	}
+
 	return os.NewFile(uintptr(fileDescriptor), tokenPath), nil
 }
 
@@ -513,9 +579,11 @@ func readOpenedInferenceTokenFile(tokenFile *os.File, tokenPath string) (string,
 		slog.Warn("config.inference_token_file.stat_failed", "path", tokenPath, "err", err)
 		return "", fmt.Errorf("stat inference token_file %s: %w", tokenPath, err)
 	}
+
 	if !tokenInfo.Mode().IsRegular() {
 		return "", fmt.Errorf("inference token_file must be a regular file: %s", tokenPath)
 	}
+
 	if tokenInfo.Mode().Perm() != 0o600 {
 		return "", fmt.Errorf("inference token_file must have permissions 0600: %s", tokenPath)
 	}
@@ -525,6 +593,7 @@ func readOpenedInferenceTokenFile(tokenFile *os.File, tokenPath string) (string,
 		slog.Warn("config.inference_token_file.read_failed", "path", tokenPath, "err", err)
 		return "", fmt.Errorf("read inference token_file %s: %w", tokenPath, err)
 	}
+
 	if len(tokenBytes) > maxInferenceTokenBytes {
 		return "", fmt.Errorf(
 			"inference token_file exceeds maximum size of %d bytes: %s",
@@ -532,10 +601,12 @@ func readOpenedInferenceTokenFile(tokenFile *os.File, tokenPath string) (string,
 			tokenPath,
 		)
 	}
+
 	token := strings.TrimSpace(string(tokenBytes))
 	if token == "" {
 		return "", fmt.Errorf("inference token_file is empty: %s", tokenPath)
 	}
+
 	return token, nil
 }
 
@@ -544,12 +615,14 @@ func resolveTokenFilePath(configPath string, tokenFile string) (string, error) {
 	if tokenPath == "" {
 		return "", errors.New("inference token_file path is empty")
 	}
+
 	if tokenPath == "~" || strings.HasPrefix(tokenPath, "~/") {
 		homeDirectory, err := os.UserHomeDir()
 		if err != nil {
 			slog.Warn("config.inference_token_file.home_failed", "err", err)
 			return "", fmt.Errorf("resolve home directory for inference token_file: %w", err)
 		}
+
 		if tokenPath == "~" {
 			tokenPath = homeDirectory
 		} else {
@@ -558,9 +631,11 @@ func resolveTokenFilePath(configPath string, tokenFile string) (string, error) {
 	} else if strings.HasPrefix(tokenPath, "~") {
 		return "", errors.New("inference token_file does not support user-specific home paths")
 	}
+
 	if !filepath.IsAbs(tokenPath) {
 		tokenPath = filepath.Join(filepath.Dir(configPath), tokenPath)
 	}
+
 	return filepath.Clean(tokenPath), nil
 }
 
@@ -586,5 +661,6 @@ func MergeProjectRules(cfg *Config, repoPath string) (*Config, error) {
 
 	merged := *cfg
 	merged.Rules = append(append([]Rule{}, cfg.Rules...), local.Rules...)
+
 	return &merged, nil
 }

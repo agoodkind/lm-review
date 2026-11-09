@@ -39,12 +39,17 @@ func init() {
 	if err == nil {
 		w = io.MultiWriter(os.Stderr, f)
 	}
-	slog.SetDefault(slog.New(slog.NewJSONHandler(w, nil).WithAttrs([]slog.Attr{
-		slog.String("commit", version.Commit),
-		slog.String("version", version.Version),
-		slog.String("buildHash", version.BuildHash()),
-		slog.String("dirty", version.Dirty),
-	})))
+
+	slog.SetDefault(
+		slog.New(
+			slog.NewJSONHandler(w, nil).WithAttrs([]slog.Attr{
+				slog.String("commit", version.Commit),
+				slog.String("version", version.Version),
+				slog.String("buildHash", version.BuildHash()),
+				slog.String("dirty", version.Dirty),
+			}),
+		),
+	)
 }
 
 // lmReviewLog returns the package-scoped slog logger drawn from ctx.
@@ -62,6 +67,7 @@ func tryFindRepoRoot(ctx context.Context) (string, bool) {
 		lmReviewLog(ctx).InfoContext(ctx, "skipping review: not in a git repo", "err", err)
 		return "", false
 	}
+
 	return repoRoot, true
 }
 
@@ -72,6 +78,7 @@ func main() {
 	if errors.Is(err, errBlock) {
 		os.Exit(1)
 	}
+
 	if err != nil {
 		os.Exit(1)
 	}
@@ -108,17 +115,28 @@ func newDiffCmd() *cobra.Command {
 			if deepCompat {
 				depth = "deep"
 			}
+
 			repoRoot, ok := tryFindRepoRoot(cmd.Context())
 			if !ok {
 				return nil
 			}
-			return runReview(cmd.Context(), "diff", reviewpb.ReviewMode_REVIEW_MODE_STAGED_DIFF, repoRoot, depth, model, "")
+
+			return runReview(
+				cmd.Context(),
+				"diff",
+				reviewpb.ReviewMode_REVIEW_MODE_STAGED_DIFF,
+				repoRoot,
+				depth,
+				model,
+				"",
+			)
 		},
 	}
 	cmd.Flags().StringVar(&depth, "depth", "normal", "Review depth: quick, normal, deep, ultra")
 	cmd.Flags().StringVar(&model, "model", "", "Override model for this request")
 	cmd.Flags().BoolVar(&deepCompat, "deep", false, "Alias for --depth deep (deprecated)")
 	_ = cmd.Flags().MarkHidden("deep")
+
 	return cmd
 }
 
@@ -132,11 +150,21 @@ func newPRCmd() *cobra.Command {
 			if deepCompat {
 				depth = "deep"
 			}
+
 			repoRoot, err := gitutil.Root("")
 			if err != nil {
 				return fmt.Errorf("git root: %w", err)
 			}
-			return runReview(cmd.Context(), "pr", reviewpb.ReviewMode_REVIEW_MODE_PR, repoRoot, depth, model, baseRef)
+
+			return runReview(
+				cmd.Context(),
+				"pr",
+				reviewpb.ReviewMode_REVIEW_MODE_PR,
+				repoRoot,
+				depth,
+				model,
+				baseRef,
+			)
 		},
 	}
 	cmd.Flags().StringVar(&baseRef, "base-ref", "", "Base ref for PR diff")
@@ -144,6 +172,7 @@ func newPRCmd() *cobra.Command {
 	cmd.Flags().StringVar(&model, "model", "", "Override model for this request")
 	cmd.Flags().BoolVar(&deepCompat, "deep", false, "Alias for --depth deep (deprecated)")
 	_ = cmd.Flags().MarkHidden("deep")
+
 	return cmd
 }
 
@@ -157,10 +186,12 @@ func newReviewCmd() *cobra.Command {
 			if !ok {
 				return nil
 			}
+
 			reviewMode, err := parseReviewMode(mode)
 			if err != nil {
 				return err
 			}
+
 			return runReview(cmd.Context(), "review", reviewMode, repoRoot, depth, model, baseRef)
 		},
 	}
@@ -168,6 +199,7 @@ func newReviewCmd() *cobra.Command {
 	cmd.Flags().StringVar(&depth, "depth", "normal", "Review depth: quick, normal, deep, ultra")
 	cmd.Flags().StringVar(&mode, "mode", "auto", "Review mode: auto, staged, worktree, pr, repo")
 	cmd.Flags().StringVar(&model, "model", "", "Override model for this request")
+
 	return cmd
 }
 
@@ -182,9 +214,11 @@ func newRepoCmd() *cobra.Command {
 			if deepCompat {
 				depth = "deep"
 			}
+
 			if async {
 				return runRepoAsync(cmd.Context())
 			}
+
 			return runRepoSync(cmd.Context(), depth, model)
 		},
 	}
@@ -193,6 +227,7 @@ func newRepoCmd() *cobra.Command {
 	cmd.Flags().StringVar(&model, "model", "", "Override model for this request")
 	cmd.Flags().BoolVar(&deepCompat, "deep", false, "Alias for --depth deep (deprecated)")
 	_ = cmd.Flags().MarkHidden("deep")
+
 	return cmd
 }
 
@@ -202,6 +237,7 @@ func runRepoSync(ctx context.Context, depth, model string) error {
 	if err != nil {
 		return fmt.Errorf("git root: %w", err)
 	}
+
 	client, err := daemon.Connect(ctx)
 	if err != nil {
 		lmReviewLog(ctx).InfoContext(ctx, "skipping review: daemon unavailable", "err", err)
@@ -209,7 +245,14 @@ func runRepoSync(ctx context.Context, depth, model string) error {
 	}
 	defer client.Close()
 
-	resp, err := client.Review(ctx, reviewpb.ReviewMode_REVIEW_MODE_REPO, repoRoot, depth, model, "")
+	resp, err := client.Review(
+		ctx,
+		reviewpb.ReviewMode_REVIEW_MODE_REPO,
+		repoRoot,
+		depth,
+		model,
+		"",
+	)
 	if err != nil {
 		return fmt.Errorf("review repo: %w", err)
 	}
@@ -219,6 +262,7 @@ func runRepoSync(ctx context.Context, depth, model string) error {
 	if postErr != nil {
 		lmReviewLog(ctx).InfoContext(ctx, "could not post PR comment", "err", postErr)
 	}
+
 	return nil
 }
 
@@ -232,6 +276,7 @@ func newDaemonCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("daemon: %w", err)
 			}
+
 			return nil
 		},
 	}
@@ -250,22 +295,31 @@ func newInferenceCmd() *cobra.Command {
 				log.ErrorContext(cmd.Context(), "inference.config.load_failed", "err", err)
 				return fmt.Errorf("load config: %w", err)
 			}
+
 			if listenAddress == "" {
 				listenAddress = cfg.Inference.ResolveListenAddress()
 			}
+
 			if model == "" {
 				model = cfg.Inference.ResolveModel()
 			}
+
 			routedBackends, err := cfg.Inference.ResolveBackends(cfg.OpenAICompat)
 			if err != nil {
 				log.ErrorContext(cmd.Context(), "inference.backend.resolve_failed", "err", err)
 				return fmt.Errorf("resolve inference backend: %w", err)
 			}
+
 			var server *inference.Server
 			if len(routedBackends) > 0 {
-				log.InfoContext(cmd.Context(), "inference.serve.begin",
-					"listen_address", listenAddress,
-					"backends", len(routedBackends))
+				log.InfoContext(
+					cmd.Context(),
+					"inference.serve.begin",
+					"listen_address",
+					listenAddress,
+					"backends",
+					len(routedBackends),
+				)
 				server = newRoutingInferenceServer(model, routedBackends)
 			} else {
 				effectiveBackend, err := cfg.Inference.ResolveBackendCredential(cfg.OpenAICompat)
@@ -273,21 +327,30 @@ func newInferenceCmd() *cobra.Command {
 					log.ErrorContext(cmd.Context(), "inference.backend.resolve_failed", "err", err)
 					return fmt.Errorf("resolve inference backend: %w", err)
 				}
-				log.InfoContext(cmd.Context(), "inference.serve.begin",
-					"listen_address", listenAddress,
-					"model", model)
+
+				log.InfoContext(
+					cmd.Context(),
+					"inference.serve.begin",
+					"listen_address",
+					listenAddress,
+					"model",
+					model,
+				)
 				server = newInferenceServer(effectiveBackend, model)
 			}
+
 			err = inference.Serve(cmd.Context(), listenAddress, server)
 			if err != nil {
 				log.ErrorContext(cmd.Context(), "inference.serve.failed", "err", err)
 				return fmt.Errorf("serve inference: %w", err)
 			}
+
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&listenAddress, "listen", "", "gRPC listen address")
 	cmd.Flags().StringVar(&model, "model", "", "Inference model ID")
+
 	return cmd
 }
 
@@ -309,6 +372,7 @@ func newRoutingInferenceServer(
 	backends []config.ResolvedInferenceBackend,
 ) *inference.Server {
 	clients := make(map[string]inference.ModelClient)
+
 	for _, resolved := range backends {
 		client := inference.NewOpenAICompatibleClient(
 			resolved.Backend.URL,
@@ -321,6 +385,7 @@ func newRoutingInferenceServer(
 			clients[modelID] = client
 		}
 	}
+
 	return inference.NewRoutingServer(model, clients)
 }
 
@@ -337,11 +402,18 @@ func newInferenceServiceCheckCmd() *cobra.Command {
 			if listenAddress == "" {
 				cfg, err := config.Load()
 				if err != nil {
-					log.ErrorContext(cmd.Context(), "inference.service_check.config_failed", "err", err)
+					log.ErrorContext(
+						cmd.Context(),
+						"inference.service_check.config_failed",
+						"err",
+						err,
+					)
 					return fmt.Errorf("load config: %w", err)
 				}
+
 				listenAddress = cfg.Inference.ResolveListenAddress()
 			}
+
 			checkContext, cancel := context.WithTimeout(cmd.Context(), 2*time.Second)
 			defer cancel()
 			if err := inferenceservicecheck.Check(
@@ -351,9 +423,17 @@ func newInferenceServiceCheckCmd() *cobra.Command {
 				expectedPID,
 				inferenceservicecheck.DefaultDependencies(),
 			); err != nil {
-				log.ErrorContext(cmd.Context(), "inference.service_check.failed", "phase", phase, "err", err)
+				log.ErrorContext(
+					cmd.Context(),
+					"inference.service_check.failed",
+					"phase",
+					phase,
+					"err",
+					err,
+				)
 				return fmt.Errorf("inference service %s check: %w", phase, err)
 			}
+
 			return nil
 		},
 	}
@@ -361,6 +441,7 @@ func newInferenceServiceCheckCmd() *cobra.Command {
 	cmd.Flags().StringVar(&phase, "phase", "", "Check phase: preflight or post-restart")
 	cmd.Flags().IntVar(&expectedPID, "expected-pid", 0, "Expected supervised service PID")
 	_ = cmd.MarkFlagRequired("phase")
+
 	return cmd
 }
 
@@ -373,6 +454,7 @@ func newMCPCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("mcp serve: %w", err)
 			}
+
 			return nil
 		},
 	}
@@ -380,9 +462,27 @@ func newMCPCmd() *cobra.Command {
 
 // runReview connects to the daemon, runs a path-based review, prints and posts
 // the result, and signals a block verdict via [errBlock].
-func runReview(ctx context.Context, scope string, mode reviewpb.ReviewMode, repoPath, depth, model string, baseRef string) error {
-	lmReviewLog(ctx).InfoContext(ctx, "lm-review.runReview.begin",
-		"scope", scope, "mode", mode.String(), "depth", depth, "model", model)
+func runReview(
+	ctx context.Context,
+	scope string,
+	mode reviewpb.ReviewMode,
+	repoPath string,
+	depth string,
+	model string,
+	baseRef string,
+) error {
+	lmReviewLog(ctx).InfoContext(
+		ctx,
+		"lm-review.runReview.begin",
+		"scope",
+		scope,
+		"mode",
+		mode.String(),
+		"depth",
+		depth,
+		"model",
+		model,
+	)
 
 	client, err := daemon.Connect(ctx)
 	if err != nil {
@@ -407,33 +507,73 @@ func runReview(ctx context.Context, scope string, mode reviewpb.ReviewMode, repo
 	if resp.GetVerdict() == "block" {
 		return errBlock
 	}
+
 	return nil
 }
 
 func printResult(resp *reviewpb.ReviewResponse) {
 	icon := map[string]string{"pass": "✅", "warn": "⚠️", "block": "🚫", "skip": "⏭️"}[resp.GetVerdict()]
-	fmt.Fprintf(os.Stderr, "\nlm-review [%s] %s %s: %s\n",
-		resp.GetModel(), icon, strings.ToUpper(resp.GetVerdict()), resp.GetSummary())
+	fmt.Fprintf(
+		os.Stderr,
+		"\nlm-review [%s] %s %s: %s\n",
+		resp.GetModel(),
+		icon,
+		strings.ToUpper(resp.GetVerdict()),
+		resp.GetSummary(),
+	)
+
 	for _, issue := range resp.GetIssues() {
-		fmt.Fprintf(os.Stderr, "  %s:%d [%s] %s\n", issue.GetFile(), issue.GetLine(), issue.GetRule(), issue.GetMessage())
+		fmt.Fprintf(
+			os.Stderr,
+			"  %s:%d [%s] %s\n",
+			issue.GetFile(),
+			issue.GetLine(),
+			issue.GetRule(),
+			issue.GetMessage(),
+		)
 	}
+
 	fmt.Fprintln(os.Stderr)
 }
 
 func formatMarkdown(scope string, resp *reviewpb.ReviewResponse) string {
 	icon := map[string]string{"pass": "✅", "warn": "⚠️", "block": "🚫"}[resp.GetVerdict()]
-	label := map[string]string{"diff": "Fast Review", "pr": "PR Review", "repo": "Repo Health", "review": "Review"}[scope]
+	label := map[string]string{
+		"diff":   "Fast Review",
+		"pr":     "PR Review",
+		"repo":   "Repo Health",
+		"review": "Review",
+	}[scope]
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "## 🤖 %s (%s, %dms)\n\n**Verdict:** %s %s\n\n%s\n",
-		label, resp.GetModel(), resp.GetLatencyMs(), icon, strings.ToUpper(resp.GetVerdict()), resp.GetSummary())
+	fmt.Fprintf(
+		&sb,
+		"## 🤖 %s (%s, %dms)\n\n**Verdict:** %s %s\n\n%s\n",
+		label,
+		resp.GetModel(),
+		resp.GetLatencyMs(),
+		icon,
+		strings.ToUpper(resp.GetVerdict()),
+		resp.GetSummary(),
+	)
 	if len(resp.GetIssues()) > 0 {
 		sb.WriteString("\n| Severity | File | Line | Rule | Message |\n|---|---|---|---|---|\n")
+
 		for _, issue := range resp.GetIssues() {
 			sev := map[string]string{"error": "🚫", "warning": "⚠️", "info": "ℹ️"}[issue.GetSeverity()]
-			fmt.Fprintf(&sb, "| %s | `%s` | %d | `%s` | %s |\n", sev, issue.GetFile(), issue.GetLine(), issue.GetRule(), issue.GetMessage())
+			fmt.Fprintf(
+				&sb,
+				"| %s | `%s` | %d | `%s` | %s |\n",
+				sev,
+				issue.GetFile(),
+				issue.GetLine(),
+				issue.GetRule(),
+				issue.GetMessage(),
+			)
 		}
 	}
+
 	fmt.Fprintf(&sb, "\n<!-- lm-review:%s -->\n", scope)
+
 	return sb.String()
 }
 
@@ -464,7 +604,10 @@ func parseReviewMode(mode string) (reviewpb.ReviewMode, error) {
 	case reviewModeNameRepo:
 		return reviewpb.ReviewMode_REVIEW_MODE_REPO, nil
 	default:
-		return reviewpb.ReviewMode_REVIEW_MODE_UNSPECIFIED, fmt.Errorf("unknown review mode %q", mode)
+		return reviewpb.ReviewMode_REVIEW_MODE_UNSPECIFIED, fmt.Errorf(
+			"unknown review mode %q",
+			mode,
+		)
 	}
 }
 
@@ -474,6 +617,7 @@ func runRepoAsync(ctx context.Context) error {
 		lmReviewLog(ctx).ErrorContext(ctx, "lm-review.runRepoAsync.executable_failed", "err", err)
 		return fmt.Errorf("locate executable: %w", err)
 	}
+
 	// Detach from the calling context's cancellation so the background
 	// process is not killed when the parent CLI exits, while keeping
 	// any context values for tracing.
@@ -483,14 +627,21 @@ func runRepoAsync(ctx context.Context) error {
 		lmReviewLog(ctx).ErrorContext(ctx, "lm-review.runRepoAsync.start_failed", "err", startErr)
 		return fmt.Errorf("start async repo review: %w", startErr)
 	}
+
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				lmReviewLog(ctx).ErrorContext(ctx, "lm-review.runRepoAsync.wait_panicked", "panic", r)
+				lmReviewLog(ctx).ErrorContext(
+					ctx,
+					"lm-review.runRepoAsync.wait_panicked",
+					"panic",
+					r,
+				)
 			}
 		}()
 		_ = cmd.Wait()
 	}()
 	lmReviewLog(ctx).InfoContext(ctx, "deep repo review running in background")
+
 	return nil
 }

@@ -62,20 +62,25 @@ type Config struct {
 func Run(ctx context.Context, cfg Config, opts RunOptions) ([]Finding, []error) {
 	var all []Finding
 	var errs []error
+
 	for _, source := range DefaultSources() {
 		if slices.Contains(cfg.DisabledSources, source.Name()) {
 			continue
 		}
+
 		sourceOpts := opts
 		if len(sourceOpts.EnabledChecks) == 0 {
 			sourceOpts.EnabledChecks = cfg.EnabledChecks
 		}
+
 		findings, err := source.Run(ctx, sourceOpts)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", source.Name(), err))
 		}
+
 		all = append(all, findings...)
 	}
+
 	return dedupeAndSort(all), errs
 }
 
@@ -87,6 +92,7 @@ func FormatForPrompt(findings []Finding) string {
 	}
 
 	groups := map[string][]Finding{}
+
 	for _, finding := range findings {
 		groups[finding.Tool] = append(groups[finding.Tool], finding)
 	}
@@ -94,24 +100,39 @@ func FormatForPrompt(findings []Finding) string {
 	orderedTools := []string{"vet", "staticcheck", "custom", "semgrep"}
 	var builder strings.Builder
 	builder.WriteString("## Static analyzer findings\n\n")
-	builder.WriteString("These findings were computed before the LLM review. Confirm, prioritize, or reject them using code context.\n\n")
+	builder.WriteString(
+		"These findings were computed before the LLM review. Confirm, prioritize, or reject them using code context.\n\n",
+	)
+
 	for _, tool := range orderedTools {
 		items := groups[tool]
 		if len(items) == 0 {
 			continue
 		}
+
 		fmt.Fprintf(&builder, "### %s\n\n", tool)
+
 		for _, finding := range items {
-			fmt.Fprintf(&builder, "- %s:%d [%s] %s\n", finding.File, finding.Line, finding.Check, finding.Message)
+			fmt.Fprintf(
+				&builder,
+				"- %s:%d [%s] %s\n",
+				finding.File,
+				finding.Line,
+				finding.Check,
+				finding.Message,
+			)
 			if finding.Principle != "" {
 				fmt.Fprintf(&builder, "  principle: %s\n", finding.Principle)
 			}
+
 			if finding.Fix != "" {
 				fmt.Fprintf(&builder, "  fix: %s\n", finding.Fix)
 			}
 		}
+
 		builder.WriteString("\n")
 	}
+
 	return builder.String()
 }
 
@@ -124,6 +145,7 @@ func dedupeAndSort(findings []Finding) []Finding {
 		Message string
 	}
 	seen := make(map[key]bool, len(findings))
+
 	out := make([]Finding, 0, len(findings))
 	for _, finding := range findings {
 		findingKey := key{
@@ -136,20 +158,29 @@ func dedupeAndSort(findings []Finding) []Finding {
 		if seen[findingKey] {
 			continue
 		}
+
 		seen[findingKey] = true
 		out = append(out, finding)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].File != out[j].File {
-			return out[i].File < out[j].File
-		}
-		if out[i].Line != out[j].Line {
-			return out[i].Line < out[j].Line
-		}
-		if out[i].Tool != out[j].Tool {
-			return out[i].Tool < out[j].Tool
-		}
-		return out[i].Check < out[j].Check
-	})
+
+	sort.Slice(
+		out,
+		func(i, j int) bool {
+			if out[i].File != out[j].File {
+				return out[i].File < out[j].File
+			}
+
+			if out[i].Line != out[j].Line {
+				return out[i].Line < out[j].Line
+			}
+
+			if out[i].Tool != out[j].Tool {
+				return out[i].Tool < out[j].Tool
+			}
+
+			return out[i].Check < out[j].Check
+		},
+	)
+
 	return out
 }

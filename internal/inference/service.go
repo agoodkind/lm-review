@@ -161,19 +161,26 @@ func (s *Server) clientForModel(model string) (ModelClient, error) {
 				fmt.Sprintf("model %q has no configured backend", model),
 			)
 		}
+
 		return client, nil
 	}
+
 	if s.modelClient == nil {
 		return nil, status.Error(codes.FailedPrecondition, "model client is not configured")
 	}
+
 	return s.modelClient, nil
 }
 
 // Infer validates the declaration, invokes the model, and validates its output.
-func (s *Server) Infer(ctx context.Context, request *inferencepb.InferRequest) (*inferencepb.InferReply, error) {
+func (s *Server) Infer(
+	ctx context.Context,
+	request *inferencepb.InferRequest,
+) (*inferencepb.InferReply, error) {
 	if request == nil || strings.TrimSpace(request.GetPrompt()) == "" {
 		return nil, status.Error(codes.InvalidArgument, "prompt is required")
 	}
+
 	if strings.TrimSpace(request.GetInput()) == "" {
 		return nil, status.Error(codes.InvalidArgument, "input is required")
 	}
@@ -182,9 +189,12 @@ func (s *Server) Infer(ctx context.Context, request *inferencepb.InferRequest) (
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, "output_schema must be a valid JSON Schema")
 	}
-	if contextValue := request.GetContext(); contextValue != "" && !json.Valid([]byte(contextValue)) {
+
+	if contextValue := request.GetContext(); contextValue != "" &&
+		!json.Valid([]byte(contextValue)) {
 		return nil, status.Error(codes.InvalidArgument, "context must be valid JSON")
 	}
+
 	generationOptions, err := generationOptionsFromProto(request.GetGenerationOptions())
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -194,54 +204,45 @@ func (s *Server) Infer(ctx context.Context, request *inferencepb.InferRequest) (
 	if model == "" {
 		model = strings.TrimSpace(s.defaultModel)
 	}
+
 	if model == "" {
 		return nil, status.Error(codes.FailedPrecondition, "model is not configured")
 	}
+
 	modelClient, err := s.clientForModel(model)
 	if err != nil {
 		return nil, err
 	}
-	result, err := modelClient.Infer(ctx, ModelRequest{
-		Model:             model,
-		Prompt:            request.GetPrompt(),
-		Input:             request.GetInput(),
-		Context:           request.GetContext(),
-		OutputSchema:      request.GetOutputSchema(),
-		GenerationOptions: generationOptions,
-	})
+
+	result, err := modelClient.Infer(
+		ctx,
+		ModelRequest{
+			Model:             model,
+			Prompt:            request.GetPrompt(),
+			Input:             request.GetInput(),
+			Context:           request.GetContext(),
+			OutputSchema:      request.GetOutputSchema(),
+			GenerationOptions: generationOptions,
+		},
+	)
 	if err != nil {
 		return nil, modelStatusError(ctx, err)
 	}
 
-	outputJSON := result.Output
-	outputNormalized := false
+	outputJSON, outputNormalized, err := validateModelOutput(
+		schema,
+		request.GetOutputSchema(),
+		result.Output,
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	normalizationKind := ""
-	value, parseErr := jsonschema.UnmarshalJSON(bytes.NewReader([]byte(outputJSON)))
-	validationErr := error(nil)
-	if parseErr == nil {
-		validationErr = schema.Validate(value)
-	}
-	if parseErr != nil || validationErr != nil {
-		normalizedOutput, normalized := normalizeBareEnumObjectOutput(
-			request.GetOutputSchema(), result.Output,
-		)
-		if !normalized && parseErr != nil {
-			return nil, status.Error(codes.DataLoss, "model output is not valid JSON")
-		}
-		if !normalized {
-			return nil, status.Error(codes.DataLoss, "model output does not match output_schema")
-		}
-		outputJSON = normalizedOutput
-		outputNormalized = true
+	if outputNormalized {
 		normalizationKind = bareEnumObjectNormalizationKind
-		value, err = jsonschema.UnmarshalJSON(bytes.NewReader([]byte(outputJSON)))
-		if err != nil {
-			return nil, status.Error(codes.DataLoss, "model output is not valid JSON")
-		}
-		if err := schema.Validate(value); err != nil {
-			return nil, status.Error(codes.DataLoss, "model output does not match output_schema")
-		}
 	}
+
 	return &inferencepb.InferReply{
 		OutputJson: outputJSON,
 		Status:     inferencepb.InferenceStatus_INFERENCE_STATUS_COMPLETE,
@@ -275,6 +276,7 @@ func generationOptionsFromProto(options *inferencepb.GenerationOptions) (Generat
 	if options == nil {
 		return emptyGenerationOptions(), nil
 	}
+
 	reasoningEffort := ""
 	switch options.GetReasoningEffort() {
 	case inferencepb.ReasoningEffort_REASONING_EFFORT_UNSPECIFIED:
@@ -293,15 +295,21 @@ func generationOptionsFromProto(options *inferencepb.GenerationOptions) (Generat
 	default:
 		return emptyGenerationOptions(), errors.New("reasoning_effort is invalid")
 	}
+
 	if options.MaxCompletionTokens != nil && options.GetMaxCompletionTokens() <= 0 {
-		return emptyGenerationOptions(), errors.New("max_completion_tokens must be greater than zero")
+		return emptyGenerationOptions(), errors.New(
+			"max_completion_tokens must be greater than zero",
+		)
 	}
+
 	if options.Temperature != nil {
 		temperature := options.GetTemperature()
-		if math.IsNaN(temperature) || math.IsInf(temperature, 0) || temperature < 0 || temperature > 2 {
+		if math.IsNaN(temperature) || math.IsInf(temperature, 0) || temperature < 0 ||
+			temperature > 2 {
 			return emptyGenerationOptions(), errors.New("temperature must be between zero and two")
 		}
 	}
+
 	return GenerationOptions{
 		ReasoningEffort:     reasoningEffort,
 		MaxCompletionTokens: copyInt64(options.MaxCompletionTokens),
@@ -326,7 +334,9 @@ func copyInt64(value *int64) *int64 {
 	if value == nil {
 		return nil
 	}
+
 	copied := *value
+
 	return &copied
 }
 
@@ -334,7 +344,9 @@ func copyFloat64(value *float64) *float64 {
 	if value == nil {
 		return nil
 	}
+
 	copied := *value
+
 	return &copied
 }
 
@@ -342,6 +354,7 @@ func optionalInt64(value int64, present bool) *int64 {
 	if !present {
 		return nil
 	}
+
 	return &value
 }
 
@@ -349,6 +362,7 @@ func optionalFloat64(value float64, present bool) *float64 {
 	if !present {
 		return nil
 	}
+
 	return &value
 }
 
@@ -360,6 +374,7 @@ func Serve(ctx context.Context, listenAddress string, server *Server) error {
 		slog.ErrorContext(ctx, "inference.listen.failed", "err", err)
 		return fmt.Errorf("listen for inference service: %w", err)
 	}
+
 	return ServeListener(ctx, listener, server)
 }
 
@@ -397,25 +412,67 @@ func ServeListener(ctx context.Context, listener net.Listener, server *Server) e
 		slog.ErrorContext(ctx, "inference.serve.failed", "err", err)
 		return fmt.Errorf("serve inference gRPC: %w", err)
 	}
+
 	return nil
+}
+
+func validateModelOutput(
+	schema *jsonschema.Schema,
+	outputSchema string,
+	output string,
+) (string, bool, error) {
+	outputJSON := output
+	value, parseErr := jsonschema.UnmarshalJSON(bytes.NewReader([]byte(outputJSON)))
+	validationErr := error(nil)
+	if parseErr == nil {
+		validationErr = schema.Validate(value)
+	}
+
+	if parseErr == nil && validationErr == nil {
+		return outputJSON, false, nil
+	}
+
+	normalizedOutput, normalized := normalizeBareEnumObjectOutput(outputSchema, output)
+	if !normalized && parseErr != nil {
+		return "", false, status.Error(codes.DataLoss, "model output is not valid JSON")
+	}
+
+	if !normalized {
+		return "", false, status.Error(codes.DataLoss, "model output does not match output_schema")
+	}
+
+	value, err := jsonschema.UnmarshalJSON(bytes.NewReader([]byte(normalizedOutput)))
+	if err != nil {
+		return "", false, status.Error(codes.DataLoss, "model output is not valid JSON")
+	}
+
+	if err := schema.Validate(value); err != nil {
+		return "", false, status.Error(codes.DataLoss, "model output does not match output_schema")
+	}
+
+	return normalizedOutput, true, nil
 }
 
 func compileSchema(raw string) (*jsonschema.Schema, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, errInvalidSchema
 	}
+
 	decoded, err := jsonschema.UnmarshalJSON(bytes.NewReader([]byte(raw)))
 	if err != nil {
 		return nil, errInvalidSchema
 	}
+
 	compiler := jsonschema.NewCompiler()
 	if err := compiler.AddResource(schemaResourceURL, decoded); err != nil {
 		return nil, errInvalidSchema
 	}
+
 	schema, err := compiler.Compile(schemaResourceURL)
 	if err != nil {
 		return nil, errInvalidSchema
 	}
+
 	return schema, nil
 }
 
@@ -423,9 +480,11 @@ func modelStatusError(ctx context.Context, err error) error {
 	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
 		return status.Error(codes.Canceled, "inference canceled")
 	}
+
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
 		return status.Error(codes.DeadlineExceeded, "inference deadline exceeded")
 	}
+
 	return status.Error(codes.Unavailable, "model inference failed")
 }
 
@@ -437,7 +496,10 @@ type openAICompatibleClient struct {
 	settings       config.ChatSettings
 }
 
-func (c *openAICompatibleClient) Infer(ctx context.Context, request ModelRequest) (ModelResult, error) {
+func (c *openAICompatibleClient) Infer(
+	ctx context.Context,
+	request ModelRequest,
+) (ModelResult, error) {
 	client := lmstudio.New(
 		c.baseURL,
 		c.token,
@@ -450,6 +512,7 @@ func (c *openAICompatibleClient) Infer(ctx context.Context, request ModelRequest
 	if request.Context != "" {
 		input += "\n\nOpaque JSON context:\n" + request.Context
 	}
+
 	result, err := client.ChatSchemaDetailed(
 		ctx,
 		request.Prompt,
@@ -468,8 +531,10 @@ func (c *openAICompatibleClient) Infer(ctx context.Context, request ModelRequest
 			"err",
 			errors.New("OpenAI-compatible schema chat failed"),
 		)
+
 		return ModelResult{}, fmt.Errorf("schema chat: %w", err)
 	}
+
 	return ModelResult{
 		Output:                  result.Content,
 		RequestID:               result.RequestID,

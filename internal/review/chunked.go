@@ -26,7 +26,19 @@ type chunkResult struct {
 
 // ChunkedReview reviews prepared input by splitting it into chunks,
 // reviewing each independently, then merging the results into one Result.
-func ChunkedReview(ctx context.Context, client ChatClient, input string, scope string, rules []string, buildSystemPrompt PromptBuilder, buildFullPrompt UserPromptBuilder, buildChunkPrompt ChunkPromptBuilder, splitInput InputSplitter, chunkBytes, parallelism int) (*Result, error) {
+func ChunkedReview(
+	ctx context.Context,
+	client ChatClient,
+	input string,
+	scope string,
+	rules []string,
+	buildSystemPrompt PromptBuilder,
+	buildFullPrompt UserPromptBuilder,
+	buildChunkPrompt ChunkPromptBuilder,
+	splitInput InputSplitter,
+	chunkBytes int,
+	parallelism int,
+) (*Result, error) {
 	chunks := splitInput(input, chunkBytes)
 
 	if len(chunks) == 1 {
@@ -48,18 +60,23 @@ func ChunkedReview(ctx context.Context, client ChatClient, input string, scope s
 
 	for i, chunk := range chunks {
 		g.Go(func() error {
-			result, err := reviewChunk(gctx, client, chunkReviewRequest{
-				chunk:             chunk,
-				index:             i,
-				total:             len(chunks),
-				parallelism:       parallelism,
-				rules:             rules,
-				buildSystemPrompt: buildSystemPrompt,
-				buildChunkPrompt:  buildChunkPrompt,
-			})
+			result, err := reviewChunk(
+				gctx,
+				client,
+				chunkReviewRequest{
+					chunk:             chunk,
+					index:             i,
+					total:             len(chunks),
+					parallelism:       parallelism,
+					rules:             rules,
+					buildSystemPrompt: buildSystemPrompt,
+					buildChunkPrompt:  buildChunkPrompt,
+				},
+			)
 			if err != nil {
 				return err
 			}
+
 			if result == nil {
 				return nil
 			}
@@ -67,6 +84,7 @@ func ChunkedReview(ctx context.Context, client ChatClient, input string, scope s
 			mu.Lock()
 			results = append(results, chunkResult{index: i, result: result})
 			mu.Unlock()
+
 			return nil
 		})
 	}
@@ -75,13 +93,25 @@ func ChunkedReview(ctx context.Context, client ChatClient, input string, scope s
 		return nil, err
 	}
 
+	return mergeChunkResults(results, len(chunks), scope, client), nil
+}
+
+func mergeChunkResults(
+	results []chunkResult,
+	chunkCount int,
+	scope string,
+	client ChatClient,
+) *Result {
 	// Sort by chunk index to maintain deterministic ordering.
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].index < results[j].index
-	})
+	sort.Slice(
+		results,
+		func(i, j int) bool {
+			return results[i].index < results[j].index
+		},
+	)
 
 	var allIssues []Issue
-	var summaries []string
+	summaries := make([]string, 0, len(results))
 	var techDebts []string
 	var highlights []string
 	worstVerdict := VerdictPass
@@ -93,6 +123,7 @@ func ChunkedReview(ctx context.Context, client ChatClient, input string, scope s
 		if r.TechDebt != "" {
 			techDebts = append(techDebts, r.TechDebt)
 		}
+
 		highlights = append(highlights, r.Highlights...)
 		if verdictWeight(r.Verdict) > verdictWeight(worstVerdict) {
 			worstVerdict = r.Verdict
@@ -104,19 +135,24 @@ func ChunkedReview(ctx context.Context, client ChatClient, input string, scope s
 
 	// Sort: errors first, then by file+line.
 	sevOrd := map[string]int{"error": 0, "warning": 1, "info": 2}
-	sort.Slice(allIssues, func(i, j int) bool {
-		if allIssues[i].Severity != allIssues[j].Severity {
-			return sevOrd[allIssues[i].Severity] < sevOrd[allIssues[j].Severity]
-		}
-		if allIssues[i].File != allIssues[j].File {
-			return allIssues[i].File < allIssues[j].File
-		}
-		return allIssues[i].Line < allIssues[j].Line
-	})
+	sort.Slice(
+		allIssues,
+		func(i, j int) bool {
+			if allIssues[i].Severity != allIssues[j].Severity {
+				return sevOrd[allIssues[i].Severity] < sevOrd[allIssues[j].Severity]
+			}
+
+			if allIssues[i].File != allIssues[j].File {
+				return allIssues[i].File < allIssues[j].File
+			}
+
+			return allIssues[i].Line < allIssues[j].Line
+		},
+	)
 
 	merged := &Result{
 		Verdict:    worstVerdict,
-		Summary:    mergeSummaries(summaries, len(chunks)),
+		Summary:    mergeSummaries(summaries, chunkCount),
 		Issues:     allIssues,
 		Highlights: deduplicateStrings(highlights),
 		TechDebt:   mergeStrings(techDebts, "\n\n"),
@@ -126,7 +162,7 @@ func ChunkedReview(ctx context.Context, client ChatClient, input string, scope s
 	merged.recalcStats()
 	merged.inferVerdict()
 
-	return merged, nil
+	return merged
 }
 
 type chunkReviewRequest struct {
@@ -140,51 +176,94 @@ type chunkReviewRequest struct {
 }
 
 func reviewChunk(ctx context.Context, client ChatClient, req chunkReviewRequest) (*Result, error) {
-	chunkCtx := requestmeta.With(ctx, requestmeta.Metadata{
-		ReviewID:   "",
-		Scope:      "",
-		Mode:       "",
-		Depth:      "",
-		ChunkIndex: req.index + 1,
-		ChunkTotal: req.total,
-	})
+	chunkCtx := requestmeta.With(
+		ctx,
+		requestmeta.Metadata{
+			ReviewID:   "",
+			Scope:      "",
+			Mode:       "",
+			Depth:      "",
+			ChunkIndex: req.index + 1,
+			ChunkTotal: req.total,
+		},
+	)
 	log := gklog.LoggerFromContext(chunkCtx).With(
-		"component", "lm-review",
-		"subcomponent", "chunked_review",
-		"request_id", requestmeta.From(chunkCtx).RequestID(),
-		"chunk_index", req.index+1,
-		"chunk_total", req.total,
-		"chunk_bytes", len(req.chunk),
-		"parallelism", req.parallelism,
+		"component",
+		"lm-review",
+		"subcomponent",
+		"chunked_review",
+		"request_id",
+		requestmeta.From(chunkCtx).RequestID(),
+		"chunk_index",
+		req.index+1,
+		"chunk_total",
+		req.total,
+		"chunk_bytes",
+		len(req.chunk),
+		"parallelism",
+		req.parallelism,
 	)
 	start := clock.Now()
 	log.DebugContext(chunkCtx, "review.chunk.begin")
 	var raw string
 	var err error
 	if structuredClient, ok := client.(reviewChatClient); ok {
-		raw, err = structuredClient.ChatReview(chunkCtx, req.buildSystemPrompt(req.rules), req.buildChunkPrompt(req.chunk, req.index+1, req.total))
+		raw, err = structuredClient.ChatReview(
+			chunkCtx,
+			req.buildSystemPrompt(req.rules),
+			req.buildChunkPrompt(req.chunk, req.index+1, req.total),
+		)
 	} else {
-		raw, err = client.Chat(chunkCtx, req.buildSystemPrompt(req.rules), req.buildChunkPrompt(req.chunk, req.index+1, req.total))
+		raw, err = client.Chat(
+			chunkCtx,
+			req.buildSystemPrompt(req.rules),
+			req.buildChunkPrompt(req.chunk, req.index+1, req.total),
+		)
 	}
+
 	latency := clock.Since(start)
 	if err != nil && raw == "" {
-		log.ErrorContext(chunkCtx, "review.chunk.failed", "latency_ms", latency.Milliseconds(), "err", err)
+		log.ErrorContext(
+			chunkCtx,
+			"review.chunk.failed",
+			"latency_ms",
+			latency.Milliseconds(),
+			"err",
+			err,
+		)
+
 		return nil, fmt.Errorf("chunk %d/%d review: %w", req.index+1, req.total, err)
 	}
 
 	result, parseErr := Parse(raw)
 	if parseErr != nil {
-		log.WarnContext(chunkCtx, "review.chunk.unparseable",
-			"latency_ms", latency.Milliseconds(),
-			"response_bytes", len(raw),
-			"err", parseErr)
+		log.WarnContext(
+			chunkCtx,
+			"review.chunk.unparseable",
+			"latency_ms",
+			latency.Milliseconds(),
+			"response_bytes",
+			len(raw),
+			"err",
+			parseErr,
+		)
+
 		return nil, nil
 	}
-	log.DebugContext(chunkCtx, "review.chunk.end",
-		"latency_ms", latency.Milliseconds(),
-		"response_bytes", len(raw),
-		"issue_count", len(result.Issues),
-		"verdict", result.Verdict)
+
+	log.DebugContext(
+		chunkCtx,
+		"review.chunk.end",
+		"latency_ms",
+		latency.Milliseconds(),
+		"response_bytes",
+		len(raw),
+		"issue_count",
+		len(result.Issues),
+		"verdict",
+		result.Verdict,
+	)
+
 	return result, nil
 }
 
@@ -215,15 +294,19 @@ func splitIntoChunks(input string, maxBytes int, marker string) []string {
 				chunks = append(chunks, current.String())
 				current.Reset()
 			}
+
 			chunks = append(chunks, hardSplit(part, maxBytes)...)
 			continue
 		}
+
 		if current.Len()+len(part) > maxBytes && current.Len() > 0 {
 			chunks = append(chunks, current.String())
 			current.Reset()
 		}
+
 		current.WriteString(part)
 	}
+
 	if current.Len() > 0 {
 		chunks = append(chunks, current.String())
 	}
@@ -234,42 +317,51 @@ func splitIntoChunks(input string, maxBytes int, marker string) []string {
 func splitOnMarker(input, marker string) []string {
 	var parts []string
 	remaining := input
+
 	for {
 		idx := indexAfterFirst(remaining, marker, 1)
 		if idx < 0 {
 			parts = append(parts, remaining)
 			break
 		}
+
 		parts = append(parts, remaining[:idx])
 		remaining = remaining[idx:]
 	}
+
 	return parts
 }
 
 func hardSplit(input string, maxBytes int) []string {
 	var chunks []string
+
 	for len(input) > maxBytes {
 		chunks = append(chunks, input[:maxBytes])
 		input = input[maxBytes:]
 	}
+
 	if input != "" {
 		chunks = append(chunks, input)
 	}
+
 	return chunks
 }
 
 func indexAfterFirst(s, substr string, skip int) int {
 	found := 0
 	offset := 0
+
 	for {
 		idx := indexOf(s[offset:], substr)
 		if idx < 0 {
 			return -1
 		}
+
 		found++
 		if found > skip {
 			return offset + idx
 		}
+
 		offset += idx + len(substr)
 	}
 }
@@ -280,6 +372,7 @@ func indexOf(s, substr string) int {
 			return i
 		}
 	}
+
 	return -1
 }
 
@@ -297,6 +390,7 @@ func verdictWeight(v Verdict) int {
 func deduplicateIssues(issues []Issue) []Issue {
 	seen := make(map[string]bool)
 	var out []Issue
+
 	for _, issue := range issues {
 		key := fmt.Sprintf("%s:%d:%s", issue.File, issue.Line, issue.Rule)
 		if !seen[key] {
@@ -304,18 +398,21 @@ func deduplicateIssues(issues []Issue) []Issue {
 			out = append(out, issue)
 		}
 	}
+
 	return out
 }
 
 func deduplicateStrings(ss []string) []string {
 	seen := make(map[string]bool)
 	var out []string
+
 	for _, s := range ss {
 		if !seen[s] {
 			seen[s] = true
 			out = append(out, s)
 		}
 	}
+
 	return out
 }
 
@@ -323,19 +420,24 @@ func mergeSummaries(summaries []string, chunks int) string {
 	if len(summaries) == 0 {
 		return fmt.Sprintf("Reviewed %d chunks", chunks)
 	}
+
 	if len(summaries) == 1 {
 		return summaries[0]
 	}
+
 	return fmt.Sprintf("%d-chunk review: %s", chunks, summaries[0])
 }
 
 func mergeStrings(ss []string, sep string) string {
 	var out string
+
 	for i, s := range ss {
 		if i > 0 {
 			out += sep
 		}
+
 		out += s
 	}
+
 	return out
 }

@@ -24,7 +24,12 @@ type UserPromptBuilder func(input string) string
 
 // NewWithPromptBuilder creates a Reviewer with a custom prompt builder.
 // Use BuildQuickSystemPrompt for quick mode, BuildSystemPrompt for all others.
-func NewWithPromptBuilder(client ChatClient, scope string, rules []string, build PromptBuilder) *Reviewer {
+func NewWithPromptBuilder(
+	client ChatClient,
+	scope string,
+	rules []string,
+	build PromptBuilder,
+) *Reviewer {
 	return &Reviewer{
 		client:       client,
 		scope:        scope,
@@ -34,32 +39,38 @@ func NewWithPromptBuilder(client ChatClient, scope string, rules []string, build
 
 // ReviewInput reviews an arbitrary prepared input with the supplied user
 // prompt builder.
-func (r *Reviewer) ReviewInput(ctx context.Context, input string, buildUserPrompt UserPromptBuilder) (*Result, error) {
+func (r *Reviewer) ReviewInput(
+	ctx context.Context,
+	input string,
+	buildUserPrompt UserPromptBuilder,
+) (*Result, error) {
 	if input == "" {
-		return &Result{Verdict: VerdictSkip, Summary: "No changes to review.", Scope: r.scope, Model: r.client.ModelID()}, nil
+		return &Result{
+			Verdict: VerdictSkip,
+			Summary: "No changes to review.",
+			Scope:   r.scope,
+			Model:   r.client.ModelID(),
+		}, nil
 	}
 
-	metadata := requestmeta.From(ctx)
-	if metadata.RequestID() == "" {
-		ctx = requestmeta.With(ctx, requestmeta.Metadata{
-			ReviewID:   "",
-			Scope:      "",
-			Mode:       "",
-			Depth:      "",
-			ChunkIndex: 1,
-			ChunkTotal: 1,
-		})
-		metadata = requestmeta.From(ctx)
-	}
+	ctx, metadata := reviewContextMetadata(ctx)
+
 	userPrompt := buildUserPrompt(input)
 	log := gklog.LoggerFromContext(ctx).With(
-		"component", "lm-review",
-		"subcomponent", "review",
-		"request_id", metadata.RequestID(),
-		"review_id", metadata.ReviewID,
-		"scope", r.scope,
-		"system_bytes", len(r.systemPrompt),
-		"user_bytes", len(userPrompt),
+		"component",
+		"lm-review",
+		"subcomponent",
+		"review",
+		"request_id",
+		metadata.RequestID(),
+		"review_id",
+		metadata.ReviewID,
+		"scope",
+		r.scope,
+		"system_bytes",
+		len(r.systemPrompt),
+		"user_bytes",
+		len(userPrompt),
 	)
 	start := clock.Now()
 	log.InfoContext(ctx, "review.chat.begin")
@@ -70,55 +81,114 @@ func (r *Reviewer) ReviewInput(ctx context.Context, input string, buildUserPromp
 	} else {
 		raw, err = r.client.Chat(ctx, r.systemPrompt, userPrompt)
 	}
+
 	latency := clock.Since(start)
 	if err != nil {
-		log.ErrorContext(ctx, "review.chat.failed", "latency_ms", latency.Milliseconds(), "err", err)
+		log.ErrorContext(
+			ctx,
+			"review.chat.failed",
+			"latency_ms",
+			latency.Milliseconds(),
+			"err",
+			err,
+		)
+
 		return nil, fmt.Errorf("chat: %w", err)
 	}
 
 	result, err := Parse(raw)
 	if err != nil {
-		log.ErrorContext(ctx, "review.chat.parse_failed",
-			"latency_ms", latency.Milliseconds(),
-			"response_bytes", len(raw),
-			"err", err)
+		log.ErrorContext(
+			ctx,
+			"review.chat.parse_failed",
+			"latency_ms",
+			latency.Milliseconds(),
+			"response_bytes",
+			len(raw),
+			"err",
+			err,
+		)
+
 		return nil, err
 	}
 
 	result.Scope = r.scope
 	result.Model = r.client.ModelID()
-	log.InfoContext(ctx, "review.chat.end",
-		"latency_ms", latency.Milliseconds(),
-		"response_bytes", len(raw),
-		"issue_count", len(result.Issues),
-		"verdict", result.Verdict)
+	log.InfoContext(
+		ctx,
+		"review.chat.end",
+		"latency_ms",
+		latency.Milliseconds(),
+		"response_bytes",
+		len(raw),
+		"issue_count",
+		len(result.Issues),
+		"verdict",
+		result.Verdict,
+	)
+
 	return result, nil
+}
+
+func reviewContextMetadata(ctx context.Context) (context.Context, requestmeta.Metadata) {
+	metadata := requestmeta.From(ctx)
+	if metadata.RequestID() == "" {
+		ctx = requestmeta.With(
+			ctx,
+			requestmeta.Metadata{
+				ReviewID:   "",
+				Scope:      "",
+				Mode:       "",
+				Depth:      "",
+				ChunkIndex: 1,
+				ChunkTotal: 1,
+			},
+		)
+		metadata = requestmeta.From(ctx)
+	}
+
+	return ctx, metadata
 }
 
 // ReviewStatic synthesizes deterministic analyzer findings into a normal
 // review result using the existing JSON response schema.
-func (r *Reviewer) ReviewStatic(ctx context.Context, files string, analyzerSection string) (*Result, error) {
+func (r *Reviewer) ReviewStatic(
+	ctx context.Context,
+	files string,
+	analyzerSection string,
+) (*Result, error) {
 	userPrompt := StaticPrompt(files, analyzerSection)
 	metadata := requestmeta.From(ctx)
 	if metadata.RequestID() == "" {
-		ctx = requestmeta.With(ctx, requestmeta.Metadata{
-			ReviewID:   "",
-			Scope:      "",
-			Mode:       "",
-			Depth:      "",
-			ChunkIndex: 1,
-			ChunkTotal: 1,
-		})
+		ctx = requestmeta.With(
+			ctx,
+			requestmeta.Metadata{
+				ReviewID:   "",
+				Scope:      "",
+				Mode:       "",
+				Depth:      "",
+				ChunkIndex: 1,
+				ChunkTotal: 1,
+			},
+		)
 		metadata = requestmeta.From(ctx)
 	}
+
 	log := gklog.LoggerFromContext(ctx).With(
-		"component", "lm-review",
-		"subcomponent", "review",
-		"request_id", metadata.RequestID(),
-		"review_id", metadata.ReviewID,
-		"scope", r.scope,
-		"system_bytes", len(r.systemPrompt),
-		"user_bytes", len(userPrompt),
+		"component",
+		"lm-review",
+		"subcomponent",
+		"review",
+		"request_id",
+		metadata.RequestID(),
+		"review_id",
+		metadata.ReviewID,
+		"scope",
+		r.scope,
+		"system_bytes",
+		len(r.systemPrompt),
+		"user_bytes",
+		len(userPrompt),
 	)
 	start := clock.Now()
 	log.InfoContext(ctx, "review.static.chat.begin")
@@ -129,27 +199,51 @@ func (r *Reviewer) ReviewStatic(ctx context.Context, files string, analyzerSecti
 	} else {
 		raw, err = r.client.Chat(ctx, r.systemPrompt, userPrompt)
 	}
+
 	latency := clock.Since(start)
 	if err != nil {
-		log.ErrorContext(ctx, "review.static.chat.failed", "latency_ms", latency.Milliseconds(), "err", err)
+		log.ErrorContext(
+			ctx,
+			"review.static.chat.failed",
+			"latency_ms",
+			latency.Milliseconds(),
+			"err",
+			err,
+		)
+
 		return nil, fmt.Errorf("chat: %w", err)
 	}
 
 	result, err := Parse(raw)
 	if err != nil {
-		log.ErrorContext(ctx, "review.static.chat.parse_failed",
-			"latency_ms", latency.Milliseconds(),
-			"response_bytes", len(raw),
-			"err", err)
+		log.ErrorContext(
+			ctx,
+			"review.static.chat.parse_failed",
+			"latency_ms",
+			latency.Milliseconds(),
+			"response_bytes",
+			len(raw),
+			"err",
+			err,
+		)
+
 		return nil, err
 	}
 
 	result.Scope = r.scope
 	result.Model = r.client.ModelID()
-	log.InfoContext(ctx, "review.static.chat.end",
-		"latency_ms", latency.Milliseconds(),
-		"response_bytes", len(raw),
-		"issue_count", len(result.Issues),
-		"verdict", result.Verdict)
+	log.InfoContext(
+		ctx,
+		"review.static.chat.end",
+		"latency_ms",
+		latency.Milliseconds(),
+		"response_bytes",
+		len(raw),
+		"issue_count",
+		len(result.Issues),
+		"verdict",
+		result.Verdict,
+	)
+
 	return result, nil
 }

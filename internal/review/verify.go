@@ -25,20 +25,38 @@ Rules:
 // VerifyIssues asks a verification model to filter false positives from a
 // sweep pass. Issues confirmed by the verifier are kept; rejected ones are
 // dropped. On parse failure, all issues are returned (fail-open).
-func VerifyIssues(ctx context.Context, client ChatClient, issues []Issue, diff string) ([]Issue, error) {
+func VerifyIssues(
+	ctx context.Context,
+	client ChatClient,
+	issues []Issue,
+	diff string,
+) ([]Issue, error) {
 	if len(issues) == 0 {
 		return nil, nil
 	}
 
 	var sb strings.Builder
-	sb.WriteString("An automated scan found these issues. Review each one against the diff and decide which are real.\n\n")
+	sb.WriteString(
+		"An automated scan found these issues. Review each one against the diff and decide which are real.\n\n",
+	)
 	sb.WriteString("ISSUES:\n")
+
 	for i, issue := range issues {
-		fmt.Fprintf(&sb, "[%d] %s:%d [%s/%s] %s\n", i, issue.File, issue.Line, issue.Severity, issue.Rule, issue.Message)
+		fmt.Fprintf(
+			&sb,
+			"[%d] %s:%d [%s/%s] %s\n",
+			i,
+			issue.File,
+			issue.Line,
+			issue.Severity,
+			issue.Rule,
+			issue.Message,
+		)
 		if issue.Suggestion != "" {
 			fmt.Fprintf(&sb, "    suggestion: %s\n", issue.Suggestion)
 		}
 	}
+
 	sb.WriteString("\nDIFF:\n```diff\n")
 	sb.WriteString(diff)
 	sb.WriteString("\n```")
@@ -61,6 +79,7 @@ func VerifyIssues(ctx context.Context, client ChatClient, issues []Issue, diff s
 	}
 
 	var kept []Issue
+
 	for i, issue := range issues {
 		if confirmed[i] {
 			kept = append(kept, issue)
@@ -85,15 +104,18 @@ func extractJSON(s string) string {
 		if len(lines) == 2 {
 			s = lines[1]
 		}
+
 		if idx := strings.LastIndex(s, "```"); idx >= 0 {
 			s = s[:idx]
 		}
 	}
+
 	// Find first { and last }
 	start := strings.Index(s, "{")
 	end := strings.LastIndex(s, "}")
 	if start >= 0 && end > start {
 		return s[start : end+1]
 	}
+
 	return s
 }
