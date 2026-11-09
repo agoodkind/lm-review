@@ -1,4 +1,30 @@
-# staticcheck-extra: generated_at=2026-10-04T21:08:58Z
+# staticcheck-extra: generated_at=2026-11-08T23:08:24Z
+internal/analyzer/finding.go:82:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/analyzer/registry.go:3:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/audit/audit.go:65:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/claude/client.go:46:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/clock/clock.go:6:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/config/config.go:72:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/daemon/client.go:32:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/daemon/server.go:97:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/github/comment.go:13:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/gitutil/gitutil.go:72:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/inference/service.go:96:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/inferenceservicecheck/check.go:61:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/lmstudio/client.go:99:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/lmstudio/detect.go:54:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/lmstudio/lmd_preflight.go:33:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/mcpserver/server.go:24:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/requestmeta/requestmeta.go:52:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/review/chunked.go:27:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/review/prompt.go:264:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/review/result.go:562:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/review/reviewer.go:98:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/review/verify.go:25:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/tokenutil/tokenutil.go:4:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/updateopts/options.go:25:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/version/version.go:25:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
+internal/xdg/xdg.go:57:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-08T23:08:24Z last_seen=2026-11-08T23:08:24Z
 api/inferencepb/inference_contract_test.go:1:9: This test file declares package inferencepb, the package under test. A test must enter through the exported API. Change the package clause to inferencepb_test and call only exported identifiers.	# staticcheck-extra:first_added=2026-10-04T21:08:58Z last_seen=2026-10-04T21:08:58Z
 cmd/lm-review/bg.go:11:1: boundary function must emit at least one structured slog event	# staticcheck-extra:first_added=2026-05-24T00:33:42Z last_seen=2026-10-04T21:08:58Z
 cmd/lm-review/init.go:143:1: boundary function must emit at least one structured slog event	# staticcheck-extra:first_added=2026-05-24T00:33:42Z last_seen=2026-10-04T21:08:58Z

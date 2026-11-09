@@ -244,11 +244,19 @@ func parseReviewMode(mode string) (reviewpb.ReviewMode, error) {
 func formatResponse(resp *reviewpb.ReviewResponse) string {
 	icon := map[string]string{"pass": "PASS", "warn": "WARN", "block": "BLOCK", "skip": "SKIP"}[resp.Verdict]
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%s (%s, %dms): %s", icon, resp.Model, resp.LatencyMs, resp.Summary)
+	fmt.Fprintf(&sb, "%s (%s, %dms): %s", icon, resp.Model, resp.GetLatencyMs(), resp.GetSummary())
 	if len(resp.Issues) > 0 {
 		sb.WriteString("\n\n| Severity | File | Line | Rule | Message |\n|---|---|---|---|---|\n")
 		for _, issue := range resp.Issues {
-			fmt.Fprintf(&sb, "| %s | `%s` | %d | %s | %s |\n", issue.Severity, issue.File, issue.Line, issue.Rule, issue.Message)
+			fmt.Fprintf(
+				&sb,
+				"| %s | `%s` | %d | %s | %s |\n",
+				issue.Severity,
+				issue.GetFile(),
+				issue.GetLine(),
+				issue.GetRule(),
+				issue.GetMessage(),
+			)
 		}
 	}
 	return sb.String()
