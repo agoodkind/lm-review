@@ -130,6 +130,7 @@ func newUpdateStatusCmd() *cobra.Command {
 					"path",
 					options.StatePath,
 				)
+
 				return fmt.Errorf("update status: %w", err)
 			}
 

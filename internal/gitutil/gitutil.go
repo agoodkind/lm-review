@@ -22,6 +22,7 @@ func Root(dir string) (string, error) {
 	out, err := exec.Command("git", args...).Output()
 	if err != nil {
 		slog.Warn("gitutil.root.failed", "dir", dir, "err", err)
+
 		return "", fmt.Errorf(
 			"not in a git repo and no path provided. Pass path='/path/to/repo' to specify one",
 		)
@@ -61,6 +62,7 @@ func PRDiff(repoRoot string, baseRef string) (string, error) {
 	).CombinedOutput()
 	if err != nil {
 		slog.Warn("gitutil.pr_diff.fetch_failed", "repo_root", repoRoot, "err", err)
+
 		return "", fmt.Errorf(
 			"git fetch --all --prune: %w: %s",
 			err,

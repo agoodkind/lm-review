@@ -29,15 +29,18 @@ func BuildHash() string {
 	if err != nil {
 		return "unknown"
 	}
+
 	f, err := os.Open(exe)
 	if err != nil {
 		return "unknown"
 	}
+
 	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	_, err = io.Copy(h, f)
 	if err != nil {
 		return "unknown"
 	}
+
 	return hex.EncodeToString(h.Sum(nil))[:12]
 }

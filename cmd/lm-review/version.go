@@ -21,6 +21,7 @@ func newVersionCmd() *cobra.Command {
 			fmt.Fprintf(out, "commit:    %s\n", version.Commit)
 			fmt.Fprintf(out, "dirty:     %s\n", version.Dirty)
 			fmt.Fprintf(out, "buildHash: %s\n", version.BuildHash())
+
 			return nil
 		},
 	}

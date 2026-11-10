@@ -16,9 +16,11 @@ func TestParseRejectsBareReviewObjectMissingOpeningBrace(t *testing.T) {
 	if err == nil {
 		t.Fatal("Parse unexpectedly succeeded")
 	}
+
 	if result != nil {
 		t.Fatalf("Parse returned result=%#v, want nil", result)
 	}
+
 	if !strings.Contains(err.Error(), "no JSON found") {
 		t.Fatalf("Parse error=%q, want missing JSON signal", err)
 	}

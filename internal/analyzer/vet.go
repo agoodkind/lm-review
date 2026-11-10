@@ -46,5 +46,6 @@ func (vetSource) Run(ctx context.Context, opts RunOptions) ([]Finding, error) {
 		{Tool: "vet", Analyzer: unreachable.Analyzer},
 		{Tool: "vet", Analyzer: unusedresult.Analyzer},
 	}
+
 	return runAnalysisDriver(ctx, opts.RepoRoot, opts.Files, opts.EnabledChecks, specs)
 }

@@ -21,6 +21,7 @@ func (customSource) Run(ctx context.Context, opts RunOptions) ([]Finding, error)
 	if err != nil {
 		return nil, err
 	}
+
 	for i := range findings {
 		switch findings[i].Check {
 		case customanalyzer.SlogErrorWithoutErrAnalyzer.Name:
@@ -37,5 +38,6 @@ func (customSource) Run(ctx context.Context, opts RunOptions) ([]Finding, error)
 			findings[i].Fix = "Add a structured log at the operation boundary with relevant IDs and error fields."
 		}
 	}
+
 	return findings, nil
 }

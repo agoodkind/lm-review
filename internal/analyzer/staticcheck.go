@@ -16,7 +16,9 @@ func (staticcheckSource) Run(ctx context.Context, opts RunOptions) ([]Finding, e
 		if analyzer == nil || analyzer.Analyzer == nil {
 			continue
 		}
+
 		specs = append(specs, analysisSpec{Tool: "staticcheck", Analyzer: analyzer.Analyzer})
 	}
+
 	return runAnalysisDriver(ctx, opts.RepoRoot, opts.Files, opts.EnabledChecks, specs)
 }

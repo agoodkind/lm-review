@@ -98,6 +98,7 @@ func TestChatSchemaSendsCallerSchemaInStrictMode(t *testing.T) {
 				"input",
 				json.RawMessage(schema),
 			)
+
 			return err
 		},
 	)
