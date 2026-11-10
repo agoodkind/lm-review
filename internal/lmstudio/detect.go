@@ -54,6 +54,7 @@ func Detect(ctx context.Context, token string) (*Backend, error) {
 			"model_count",
 			len(detected.Models),
 		)
+
 		return detected, nil
 	}
 

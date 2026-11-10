@@ -25,21 +25,27 @@ func With(ctx context.Context, metadata Metadata) context.Context {
 	if metadata.ReviewID == "" {
 		metadata.ReviewID = current.ReviewID
 	}
+
 	if metadata.Scope == "" {
 		metadata.Scope = current.Scope
 	}
+
 	if metadata.Mode == "" {
 		metadata.Mode = current.Mode
 	}
+
 	if metadata.Depth == "" {
 		metadata.Depth = current.Depth
 	}
+
 	if metadata.ChunkIndex == 0 {
 		metadata.ChunkIndex = current.ChunkIndex
 	}
+
 	if metadata.ChunkTotal == 0 {
 		metadata.ChunkTotal = current.ChunkTotal
 	}
+
 	return context.WithValue(ctx, contextKey{}, metadata)
 }
 
@@ -54,8 +60,10 @@ func (m Metadata) RequestID() string {
 	if m.ReviewID == "" {
 		return ""
 	}
+
 	if m.ChunkIndex > 0 && m.ChunkTotal > 0 {
 		return fmt.Sprintf("%s-chunk-%d-of-%d", m.ReviewID, m.ChunkIndex, m.ChunkTotal)
 	}
+
 	return m.ReviewID + "-single"
 }

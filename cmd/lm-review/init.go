@@ -73,6 +73,7 @@ func runInit(cmd *cobra.Command, force, jsonOut bool, token, url string) error {
 				"config already exists at %s\nUse --force to overwrite, or edit directly.\n",
 				configPath,
 			)
+
 			return nil
 		}
 	}
@@ -143,6 +144,7 @@ func resolveInitBackend(ctx context.Context, url, token string) (*lmstudio.Backe
 	backend, err := lmstudio.Detect(ctx, token)
 	if err != nil {
 		slog.ErrorContext(ctx, "lm-review.init.detect_failed", "err", err)
+
 		return nil, fmt.Errorf(
 			"%w\n\nStart your LLM backend, then re-run.\nOr specify explicitly: lm-review init --url <url> --token <token>",
 			err,

@@ -7,6 +7,7 @@ func EstimateTokens(text string) int {
 	if text == "" {
 		return 0
 	}
+
 	return (len(text) + 3) / 4
 }
 
@@ -15,5 +16,6 @@ func BytesForTokens(tokens int) int {
 	if tokens <= 0 {
 		return 0
 	}
+
 	return tokens * 4
 }

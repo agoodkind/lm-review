@@ -15,6 +15,7 @@ func ConfigDir() string {
 		home, _ := os.UserHomeDir()
 		base = filepath.Join(home, ".config")
 	}
+
 	return filepath.Join(base, app)
 }
 
@@ -25,6 +26,7 @@ func StateDir() string {
 		home, _ := os.UserHomeDir()
 		base = filepath.Join(home, ".local", "state")
 	}
+
 	return filepath.Join(base, app)
 }
 
@@ -36,6 +38,7 @@ func RuntimeDir() string {
 	if base := os.Getenv("XDG_RUNTIME_DIR"); base != "" {
 		return filepath.Join(base, app)
 	}
+
 	return filepath.Join(os.TempDir(), app)
 }
 

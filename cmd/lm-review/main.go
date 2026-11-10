@@ -408,6 +408,7 @@ func newInferenceServiceCheckCmd() *cobra.Command {
 						"err",
 						err,
 					)
+
 					return fmt.Errorf("load config: %w", err)
 				}
 
@@ -431,6 +432,7 @@ func newInferenceServiceCheckCmd() *cobra.Command {
 					"err",
 					err,
 				)
+
 				return fmt.Errorf("inference service %s check: %w", phase, err)
 			}
 

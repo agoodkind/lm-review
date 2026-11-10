@@ -70,6 +70,7 @@ func (semgrepSource) Run(ctx context.Context, opts RunOptions) ([]Finding, error
 				"stderr",
 				string(exitErr.Stderr),
 			)
+
 			return nil, fmt.Errorf("semgrep: %s", string(exitErr.Stderr))
 		}
 

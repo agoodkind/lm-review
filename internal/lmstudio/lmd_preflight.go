@@ -56,6 +56,7 @@ func PreflightLoad(
 			"err",
 			err,
 		)
+
 		return nil, errors.New("build LMD load request failed: " + err.Error())
 	}
 
@@ -79,6 +80,7 @@ func PreflightLoad(
 			"status_code",
 			response.StatusCode,
 		)
+
 		return nil, fmt.Errorf("LMD load API returned %d", response.StatusCode)
 	}
 
